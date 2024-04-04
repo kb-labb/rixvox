@@ -19,8 +19,8 @@ dependencies = [
 readme = "README.md"
 
 [project.urls]
-Homepage = "https://github.com/Lauler/rixalign"
-Issues = "https://github.com/Lauler/rixalign/issues"
+Homepage = "https://github.com/kb-labb/rixvox"
+Issues = "https://github.com/kb-labb/rixvox/issues"
 
 [tool.isort]
 profile = "black"
