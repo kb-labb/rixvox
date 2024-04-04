@@ -1,0 +1,8 @@
+torch
+torchaudio
+transformers
+soundfile
+whisperx
+pyriksdagen
+rapidfuzz
+ctc_segmentation

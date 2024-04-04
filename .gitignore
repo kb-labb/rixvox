@@ -1,0 +1,6 @@
+/data
+/logs
+/corpus
+*.wav
+*.mp3
+*.zip

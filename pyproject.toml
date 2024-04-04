@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=67.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+version = "0.0.1"
+name = "rixalign"
+
+requires-python = ">= 3.9"
+
+dependencies = [
+  "transformers>=4.38.0",
+  "datasets>=2.18.0",
+  "torch>=2.1.2",
+  "accelerate>=0.25.0",
+  "tqdm>=4.66.1",
+]
+
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/Lauler/rixalign"
+Issues = "https://github.com/Lauler/rixalign/issues"
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+line-length = 99
