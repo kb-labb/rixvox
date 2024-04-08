@@ -36,7 +36,12 @@ argparser.add_argument(
 argparser.add_argument("--gpu_id", type=int, default=0)
 argparser.add_argument("--max_length", type=int, default=185)
 argparser.add_argument(
-    "--overwrite", action="store_true", help="Overwrite existing transcriptions."
+    "--overwrite_all", action="store_true", help="Overwrite all existing transcriptions."
+)
+argparser.add_argument(
+    "--overwrite_model",
+    action="store_true",
+    help="Overwrite existing transcriptions for the model.",
 )
 
 args = argparser.parse_args()

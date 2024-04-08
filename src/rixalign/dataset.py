@@ -1,4 +1,5 @@
 import json
+import multiprocessing as mp
 import os
 import subprocess
 import tempfile
@@ -7,6 +8,7 @@ import numpy as np
 import soundfile as sf
 import torch
 from torch.utils.data import Dataset
+from tqdm import tqdm
 from transformers import Wav2Vec2Processor, WhisperProcessor
 
 from rixalign.audio import convert_audio_to_wav
@@ -256,3 +258,15 @@ def make_transcription_chunks_w2v(
         transcription_chunks.append(transcription_dict)
 
     return transcription_chunks
+
+
+def read_json(json_path):
+    with open(json_path) as f:
+        sub_dict = json.load(f)
+    return sub_dict
+
+
+def read_json_parallel(json_paths, num_workers=6):
+    with mp.Pool(num_workers) as pool:
+        sub_dicts = pool.map(read_json, tqdm(json_paths, total=len(json_paths)), chunksize=1)
+    return sub_dicts

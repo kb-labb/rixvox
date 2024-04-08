@@ -25,6 +25,7 @@ abbreviations = {
     "f.n.": "för närvarande",
     "f.ö.": "för övrigt",
     "fr.o.m.": "från och med",
+    "inkl.": "inklusive",
     "k.m:t": "kunglig majestät",
     "kungl. maj:t": "kunglig majestät",
     "m.a.o.": "med andra ord",

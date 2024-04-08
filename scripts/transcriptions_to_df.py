@@ -1,11 +1,15 @@
 import glob
 import json
+import multiprocessing as mp
 import re
+import sqlite3
+from itertools import repeat
 
 import pandas as pd
 from tqdm import tqdm
 
-from rixalign.speech_finder import contiguous_fuzzy_match
+from rixalign.dataset import read_json_parallel
+from rixalign.speech_finder import contiguous_fuzzy_match_split
 from rixalign.text import normalize_text
 
 df = pd.read_parquet("data/riksdagen_speeches.parquet")
@@ -13,17 +17,7 @@ df["anftext_normalized"] = df["text"].apply(normalize_text)
 
 # read vad json
 json_files = glob.glob("data/vad_output/*.json")
-
-audio_files = []
-transcriptions = []
-for json_file in json_files:
-    with open(json_file) as f:
-        print(json_file)
-        transcription = json.load(f)
-        audio_files.append(transcription["metadata"]["audio_path"])
-        transcriptions.append(transcription)
-
-df_transcription = pd.json_normalize(transcription, "chunks", ["metadata"])
+transcriptions = read_json_parallel(json_files, num_workers=6)
 
 # Expand nested list[dict] column "transcription" to columns
 df_transcription = pd.json_normalize(transcriptions, "chunks", ["metadata"])
@@ -74,8 +68,6 @@ df_debate["text_timestamps"] = df_debate["text_timestamps"].apply(
 )
 
 
-import sqlite3
-
 conn = sqlite3.connect(":memory:")
 df[["speaker_id", "speech_id", "date", "name", "party"]].to_sql("speeches", conn, index=False)
 df_debate[["audio_path", "date_start", "date_end"]].to_sql("debates", conn, index=False)
@@ -102,24 +94,21 @@ df_combinations = df_combinations.merge(
     df[["speech_id", "anftext_normalized"]], how="left", left_on="speech_id", right_on="speech_id"
 )
 
-scores = []
-for i, row in tqdm(df_combinations.iterrows(), total=len(df_combinations)):
-    scores.append(
-        contiguous_fuzzy_match(
-            anftext_normalized=row["anftext_normalized"],
-            anftext_inference=row["inference_normalized"],
-        )
+with mp.Pool(7) as pool:
+    args = zip(
+        df_combinations["anftext_normalized"].tolist(),
+        df_combinations["inference_normalized"].tolist(),
+        repeat(55),  # threshold
+        repeat(100),  # max_length
+    )
+    scores = pool.starmap(
+        contiguous_fuzzy_match_split, tqdm(args, total=len(df_combinations)), chunksize=10
     )
 
-
-df_combinations[0:1]
-df_combinations
-len(scores)
-
-df_test = df_combinations[0:2600]
-df_test[["word_start", "word_end", "score"]] = pd.DataFrame(scores[0:2600])
+df_aligned = df_combinations
+df_aligned[["word_start", "word_end", "score"]] = pd.DataFrame(scores)
 # Make word_start and word_end integers and allow for None/NaN
-df_test[["word_start", "word_end"]] = df_test[["word_start", "word_end"]].astype("Int64")
+df_aligned[["word_start", "word_end"]] = df_aligned[["word_start", "word_end"]].astype("Int64")
 
 
 # Get the start_time and end_time from text_timestamps for word_start and word_end
@@ -133,6 +122,17 @@ def get_timestamps(row):
     )
 
 
-df_test[["start_time", "end_time"]] = df_test[["text_timestamps", "word_start", "word_end"]].apply(
-    get_timestamps, axis=1, result_type="expand"
+df_aligned[["start_time", "end_time"]] = df_aligned[
+    ["text_timestamps", "word_start", "word_end"]
+].apply(get_timestamps, axis=1, result_type="expand")
+
+df_aligned.drop("text_timestamps", axis=1)
+
+df_aligned.drop(["text_timestamps", "inference_normalized"], axis=1).to_parquet(
+    "data/aligned_speeches.parquet", index=False
 )
+
+# Remove speeches where both word_start and word_end are NA
+df_aligned2 = df_aligned[
+    ~(df_aligned["word_start"].isna() & df_aligned["word_end"].isna())
+].reset_index(drop=True)
