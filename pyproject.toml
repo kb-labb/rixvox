@@ -3,8 +3,8 @@ requires = ["setuptools>=67.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.0.1"
-name = "rixalign"
+version = "0.0.2"
+name = "rixvox"
 
 requires-python = ">= 3.9"
 
@@ -14,6 +14,8 @@ dependencies = [
   "torch>=2.1.2",
   "accelerate>=0.25.0",
   "tqdm>=4.66.1",
+  "ctc-segmentation>=1.7.4",
+  "soundfile>=0.12.1",
 ]
 
 readme = "README.md"

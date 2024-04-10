@@ -2,7 +2,7 @@ import json
 
 from transformers import pipeline
 
-from rixalign.parlaspeech.matching import Matcher, load_segments, load_valid_json
+from rixvox.parlaspeech.matching import Matcher, load_segments, load_valid_json
 from subtitles_riksdag import get_audio_metadata
 
 audiofile = "data/audio/2442404050040696921_720p.mp4"

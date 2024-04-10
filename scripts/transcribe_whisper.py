@@ -8,7 +8,7 @@ import torch
 from tqdm import tqdm
 from transformers import WhisperForConditionalGeneration
 
-from rixalign.dataset import (
+from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks,

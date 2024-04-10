@@ -8,9 +8,9 @@ from itertools import repeat
 import pandas as pd
 from tqdm import tqdm
 
-from rixalign.dataset import read_json_parallel
-from rixalign.speech_finder import contiguous_fuzzy_match_split
-from rixalign.text import normalize_text
+from rixvox.dataset import read_json_parallel
+from rixvox.speech_finder import contiguous_fuzzy_match_split
+from rixvox.text import normalize_text
 
 df = pd.read_parquet("data/riksdagen_speeches.parquet")
 df["anftext_normalized"] = df["text"].apply(normalize_text)
@@ -36,6 +36,7 @@ df_transcription["date_end"] = df_transcription["dates"].apply(lambda x: x[-1])
 df_transcription["inference_normalized"] = df_transcription["text"].apply(normalize_text)
 df_transcription["duration"] = df_transcription["end"] - df_transcription["start"]
 df_transcription["duration"].sum() / 1000 / 60 / 60
+
 
 def get_global_timestamps(text_timestamps, start):
     for timestamp in text_timestamps:
@@ -140,6 +141,8 @@ df_aligned2 = df_aligned[
 
 
 df[["text", "speech_id", "name", "party", "date", "protocol_id"]]
-df_aligned[["speech_id", "name", "party", "date", "score", "start_time", "end_time", "audio_path"]][0:50]
+df_aligned[
+    ["speech_id", "name", "party", "date", "score", "start_time", "end_time", "audio_path"]
+][0:50]
 
 df_aligned = pd.read_parquet("data/aligned_speeches.parquet")

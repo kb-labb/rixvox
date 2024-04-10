@@ -9,7 +9,7 @@ import torch
 from pyannote.audio import Pipeline
 from tqdm import tqdm
 
-from rixalign.dataset import VADAudioDataset
+from rixvox.dataset import VADAudioDataset
 
 pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 pipeline.to(torch.device("cuda"))

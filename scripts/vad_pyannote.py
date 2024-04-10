@@ -10,8 +10,8 @@ import torch
 from pyannote.audio import Model
 from tqdm import tqdm
 
-from rixalign.dataset import VADAudioDataset
-from rixalign.vad import VoiceActivitySegmentation, merge_chunks
+from rixvox.dataset import VADAudioDataset
+from rixvox.vad import VoiceActivitySegmentation, merge_chunks
 
 # Set torch device cuda if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

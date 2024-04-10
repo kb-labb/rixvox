@@ -8,8 +8,8 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCTC, Wav2Vec2CTCTokenizer, Wav2Vec2Processor
 
-from rixalign.ctc_segmentation import get_word_timestamps_hf
-from rixalign.dataset import (
+from rixvox.ctc_segmentation import get_word_timestamps_hf
+from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
