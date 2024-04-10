@@ -5,7 +5,7 @@ from json import loads
 import requests
 from tqdm import tqdm
 
-from rixalign.text import preprocess_audio_metadata
+from rixvox.text import preprocess_audio_metadata
 
 
 def get_audio_metadata(rel_dok_id, backoff_factor=0.2):

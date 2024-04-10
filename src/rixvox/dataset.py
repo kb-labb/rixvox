@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers import Wav2Vec2Processor, WhisperProcessor
 
-from rixalign.audio import convert_audio_to_wav
+from rixvox.audio import convert_audio_to_wav
 
 
 class AudioDataset(Dataset):

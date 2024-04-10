@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple
 
 from Levenshtein import editops, matching_blocks, ratio
 
-from rixalign.text import normalize_text
+from rixvox.text import normalize_text
 
 
 def tokenize_reference(text, normalize=True):

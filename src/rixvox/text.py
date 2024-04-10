@@ -5,7 +5,7 @@ import unicodedata
 import pandas as pd
 from num2words import num2words
 
-from rixalign.parlaspeech.strings_sv import abbreviations, ocr_corrections, symbols
+from rixvox.parlaspeech.strings_sv import abbreviations, ocr_corrections, symbols
 
 
 def tokenize_segment(text):
