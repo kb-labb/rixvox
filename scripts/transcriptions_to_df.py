@@ -34,7 +34,8 @@ df_transcription = df_transcription.drop(columns=["metadata"])
 df_transcription["date_start"] = df_transcription["dates"].apply(lambda x: x[0])
 df_transcription["date_end"] = df_transcription["dates"].apply(lambda x: x[-1])
 df_transcription["inference_normalized"] = df_transcription["text"].apply(normalize_text)
-
+df_transcription["duration"] = df_transcription["end"] - df_transcription["start"]
+df_transcription["duration"].sum() / 1000 / 60 / 60
 
 def get_global_timestamps(text_timestamps, start):
     for timestamp in text_timestamps:
@@ -136,3 +137,9 @@ df_aligned.drop(["text_timestamps", "inference_normalized"], axis=1).to_parquet(
 df_aligned2 = df_aligned[
     ~(df_aligned["word_start"].isna() & df_aligned["word_end"].isna())
 ].reset_index(drop=True)
+
+
+df[["text", "speech_id", "name", "party", "date", "protocol_id"]]
+df_aligned[["speech_id", "name", "party", "date", "score", "start_time", "end_time", "audio_path"]][0:50]
+
+df_aligned = pd.read_parquet("data/aligned_speeches.parquet")

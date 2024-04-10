@@ -6,7 +6,17 @@ from typing import Dict, List, Set, Tuple
 
 from Levenshtein import editops, matching_blocks, ratio
 
-from rixalign.parlaspeech.normalization import normalize
+from rixalign.text import normalize_text
+
+
+def tokenize_reference(text, normalize=True):
+    tokens = text.strip().split()
+    match_tokens = map(lambda t: t.lower(), tokens)
+    if normalize:
+        match_tokens = map(normalize_text, match_tokens)
+
+    match_tokens = map(lambda t: t.upper(), match_tokens)
+    return tokens, list(match_tokens)
 
 
 @dataclass
@@ -45,6 +55,15 @@ def load_segments(file: Path) -> List[Segment]:
             ret.append(
                 Segment(data["file"], data["start"], data["end"], data["text"].strip().split())
             )
+    return sorted(ret, key=lambda x: (x.file, x.start))
+
+
+def load_valid_json(file: Path) -> List[Segment]:
+    ret = []
+    with open(file) as f:
+        data = json.load(f)
+        for l in data:
+            ret.append(Segment(l["file"], l["start"], l["end"], l["text"].strip().split()))
     return sorted(ret, key=lambda x: (x.file, x.start))
 
 
@@ -103,17 +122,18 @@ class Matcher:
     This class loads a large text corpus and allows matching short text segments to it.
     """
 
-    def __init__(self, corpus: Path):
+    def __init__(self, corpus: Path, normalize=True):
         lines = []
-        self.corpus = []
+        self.corpus = []  # expl: Corpus is a list of ids in the vocabulary
+        self.original_text = []
         words = set()
         self.vocab = Dictionary()
         with open(corpus) as f:
             for l in f:
-                tok = normalize(l.strip())
-                tok = tok.strip().split()
-                lines.append(tok)
-                words.update(tok)
+                tokens, norm_tokens = tokenize_reference(l, normalize)
+                lines.append(norm_tokens)
+                self.original_text.extend(tokens)
+                words.update(norm_tokens)
             self.vocab.put(words)
             for l in lines:
                 for w in l:
@@ -261,6 +281,27 @@ class Matcher:
             print("SEGMENT\t" + words)
             print(f"RATIO \t {pos.ratio}")
             print("--------------")
+
+    def get_matches(self, positions: List[Position], bm=True):
+        returnlist = []
+        for pos in positions:
+            original_words = self.original_text[pos.corp_start : pos.corp_end]
+            if bm:
+                segment_words = pos.segment.text_bm[pos.seg_start : pos.seg_end]
+            else:
+                segment_words = pos.segment.text_nn[pos.seg_start : pos.seg_end]
+            matchdict = {
+                "start": pos.segment.start,
+                "end": pos.segment.end,
+                "corpus_text": " ".join(original_words),
+                "asr_text": " ".join(segment_words),
+                "ratio": pos.ratio,
+                "file": pos.segment.file,
+                "corpus_start": pos.corp_start,
+                "corpus_end": pos.corp_end,
+            }
+            returnlist.append(matchdict)
+        return returnlist
 
     def resegment_positions(
         self,

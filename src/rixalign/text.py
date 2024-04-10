@@ -2,6 +2,7 @@ import re
 import string
 import unicodedata
 
+import pandas as pd
 from num2words import num2words
 
 from rixalign.parlaspeech.strings_sv import abbreviations, ocr_corrections, symbols
@@ -150,3 +151,142 @@ def check_abbreviations(text):
     """
     abbreviations = re.findall(r"(?:[a-zA-ZåäöÅÄÖ]+[\.\:]){1,}(?!\s)[a-zA-ZåäöÅÄÖ\.]", text)
     return abbreviations
+
+
+def preprocess_audio_metadata(speech_metadata):
+    """
+    Preprocess the speech_metadata dict to a pandas dataframe on modern Swedish parliament speeches
+    retrieved from the Riksdagen API.
+
+    Args:
+        speech_metadata (dict): Nested metadata fields with transcribed texts, media file
+            URLs and more from the Riksdagen API.
+
+    Returns:
+        pd.DataFrame: A pandas dataframe with the relevant metadata fields.
+    """
+
+    df = pd.DataFrame(speech_metadata["videodata"])
+    df = df.explode("speakers").reset_index(drop=True)
+    df_files = pd.json_normalize(df["streams"], ["files"])
+    df_speakers = pd.json_normalize(df["speakers"])
+    df = df.drop(columns=["streams", "speakers"])
+    df = pd.concat([df, df_files], axis=1)
+    df = pd.concat([df, df_speakers], axis=1)
+
+    df = df[
+        [
+            "dokid",
+            "party",
+            "start",
+            "duration",
+            "debateseconds",
+            "title",
+            "text",
+            "debatename",
+            "debatedate",
+            "url",
+            "debateurl",
+            "id",
+            "subid",
+            "audiofileurl",
+            "downloadfileurl",
+            "debatetype",
+            "number",
+            "anftext",
+        ]
+    ]
+
+    df = preprocess_text(df, is_audio_metadata=True)
+
+    return df
+
+
+def preprocess_text(df, textcol="anftext", is_audio_metadata=False):
+    """
+    Preprocess the text field on modern Swedish parliament speeches retrieved from the
+    Riksdagen API.
+
+    Args:
+        df (pd.DataFrame): A pandas dataframe that contains text column with speeches.
+        textcol (str): The name of the text column.
+
+    Returns:
+        pd.DataFrame: A pandas dataframe with preprocessed text column.
+    """
+
+    # Remove all text within <p> tags that contain "STYLEREF".
+    # These are headers mistakenly included in the text as paragraphs.
+    df[textcol] = df[textcol].str.replace(r"(<p> STYLEREF.*?</p>)", "", regex=True)
+    df[textcol] = df[textcol].str.replace(r"(<p>Gransknings- STYLEREF.*?</p>)", "", regex=True)
+    df[textcol] = df[textcol].str.replace(r"(<p><em></em><em> STYLEREF.*?</p>)", "", regex=True)
+
+    # Some extra headers that don't contain "STYLEREF", but are still in <p> tags.
+    # We grab the headers from the header column and remove "<p>{header}</p>" from the text column.
+    # data/headers.csv is created in scripts/preprocess_speeches_metadata.py.
+    headers = pd.read_csv("data/headers.csv")["avsnittsrubrik"].tolist()
+
+    for header in headers:
+        remove_header_p = f"<p>{header}</p>"
+        df[textcol] = df[textcol].str.replace(remove_header_p, "", regex=False)
+
+    df[textcol] = df[textcol].str.replace(r"<.*?>", " ", regex=True)  # Remove HTML tags
+    # Remove text within parentheses, e.g. (applåder)
+    df[textcol] = df[textcol].str.replace(r"\(.*?\)", "", regex=True)
+
+    # Speaker of the house or other text not part of actual speech.
+    # Found at the end of a transcript.
+    df[textcol] = df[textcol].str.replace(
+        r"(Interpellationsdebatten var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Partiledardebatten var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Frågestunden var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Överläggningen var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Den särskilda debatten var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Statsministerns frågestund var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Återrapporteringen var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Den muntliga frågestunden var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Den utrikespolitiska debatten var [h|d]ärmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Den allmänpolitiska debatten var härmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Den aktuella debatten var härmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(r"(Informationen var härmed avslutad.*)", "", regex=True)
+    df[textcol] = df[textcol].str.replace(
+        r"(Den EU-politiska (partiledar)?debatten var härmed avslutad.*)", "", regex=True
+    )
+    df[textcol] = df[textcol].str.replace(
+        r"(Debatten med anledning av (vår|budget)propositionens avlämnande var härmed avslutad.*)",
+        "",
+        regex=True,
+    )
+    df[textcol] = df[textcol].str.replace(r"(I detta anförande instämde.*)", "", regex=True)
+
+    df[textcol] = df[textcol].str.strip()
+
+    # Normalize text
+    df[textcol] = df[textcol].str.normalize("NFKC")  # Normalize unicode characters
+    # Remove multiple spaces
+    df[textcol] = df[textcol].str.replace(r"(\s){2,}", " ", regex=True)
+    # Replace &amp; with &
+    df[textcol] = df[textcol].str.replace(r"&amp;", "&", regex=True)
+
+    return df

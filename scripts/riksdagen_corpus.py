@@ -114,7 +114,7 @@ mop = mop.merge(party_affiliation, on="swerik_id", how="left", suffixes=("", "_p
 
 # We need a parser for reading in XML data
 parser = etree.XMLParser(remove_blank_text=True)
-protocols = list(protocol_iterators("corpus/protocols", start=1990, end=1992))
+protocols = list(protocol_iterators("corpus/protocols", start=1966, end=2000))
 
 speeches = []  # 24764
 for protocol in progressbar.progressbar(protocols):
