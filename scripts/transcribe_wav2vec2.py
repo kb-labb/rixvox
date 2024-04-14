@@ -80,6 +80,9 @@ dataloader_datasets = torch.utils.data.DataLoader(
 TIME_OFFSET = model.config.inputs_to_logits_ratio / processor.feature_extractor.sampling_rate
 
 for dataset_info in tqdm(dataloader_datasets):
+    if batch is None:
+        continue
+
     logging.info(f"Transcribing: {dataset_info[0]['json_path']}.")
 
     if dataset_info[0]["is_transcribed_same_model"]:

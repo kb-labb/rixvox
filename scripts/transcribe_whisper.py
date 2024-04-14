@@ -87,6 +87,11 @@ dataloader_datasets = torch.utils.data.DataLoader(
 )
 
 for dataset_info in tqdm(dataloader_datasets):
+    if dataset_info is None:
+        # If audio file is corrupted and non-readable.
+        # Audio file names logged in logs/error_audio_files.txt
+        continue
+
     if dataset_info[0]["is_transcribed_same_model"]:
         logger.info(f"Already transcribed: {dataset_info[0]['json_path']}.")
         continue  # Skip already transcribed videos

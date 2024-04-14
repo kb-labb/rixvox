@@ -36,6 +36,10 @@ def load_vad_model(
 # Custom data collator
 def collate_fn(batch):
     audio = [x for x in batch if x is not None]
+
+    if len(audio) == 0:
+        return None
+
     return audio
 
 
@@ -50,7 +54,6 @@ if __name__ == "__main__":
 
     # Create VAD dataset
     audio_files = glob.glob("data/**/*.mp3")
-    audio_files = [x for x in audio_files if "RD_EN_L_1991-04-10_1991-04-11.2.mp3" in x]
     dataset = VADAudioDataset(audio_files)
 
     # Create a torch dataloader
@@ -61,6 +64,9 @@ if __name__ == "__main__":
     # Run VAD on all audio files
     all_segments = []
     for batch in tqdm(dataloader):
+        if batch is None:
+            continue
+
         for audio in batch:
             vad_segments = vad_pipeline(
                 {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}

@@ -94,8 +94,15 @@ class AudioFileChunkerDataset(Dataset):
 
     def read_audio(self, audio_path):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
-            audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
+            try:
+                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
+                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
+            except Exception as e:
+                print(f"Error reading audio file {audio_path}. {e}")
+                os.makedirs("logs", exist_ok=True)
+                with open("logs/error_audio_files.txt", "a") as f:
+                    f.write(f"{audio_path}\n")
+                return None
         return audio, sr
 
     def json_chunks(self, sub_dict):
@@ -162,39 +169,21 @@ class VADAudioDataset(torch.utils.data.Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        audio = self.load_audio(self.files[idx])
+        audio, sr = self.read_audio(self.files[idx])
         return audio
 
-    def load_audio(self, file: str):
-        """
-        Open an audio file and read as mono waveform, resampling as necessary
-        A NumPy array containing the audio waveform, in float32 dtype.
-        """
-        try:
-            # Launches a subprocess to decode audio while down-mixing and resampling as necessary.
-            # Requires the ffmpeg CLI to be installed.
-            cmd = [
-                "ffmpeg",
-                "-nostdin",
-                "-threads",
-                "0",
-                "-i",
-                file,
-                "-f",
-                "s16le",
-                "-ac",
-                "1",
-                "-acodec",
-                "pcm_s16le",
-                "-ar",
-                str(self.sr),
-                "-",
-            ]
-            out = subprocess.run(cmd, capture_output=True, check=True).stdout
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to load audio: {e.stderr.decode()}") from e
-
-        return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+    def read_audio(self, audio_path):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            try:
+                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
+                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
+            except Exception as e:
+                print(f"Error reading audio file {audio_path}. {e}")
+                os.makedirs("logs", exist_ok=True)
+                with open("logs/error_audio_files.txt", "a") as f:
+                    f.write(f"{audio_path}\n")
+                return None
+        return audio, sr
 
 
 def custom_collate_fn(batch: dict) -> list:

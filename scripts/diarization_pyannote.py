@@ -1,7 +1,6 @@
 import glob
 import json
 import os
-import subprocess
 
 import numpy as np
 import pandas as pd
@@ -25,19 +24,20 @@ def collate_fn(batch):
 
 
 dataloader = torch.utils.data.DataLoader(
-    dataset, batch_size=2, collate_fn=collate_fn, shuffle=False, num_workers=3
+    dataset, batch_size=1, collate_fn=collate_fn, shuffle=False, num_workers=2
 )
 
 all_segments = []
 for batch in tqdm(dataloader):
     for audio in batch:
         diarization_segments = pipeline(
-            {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}
+            {
+                "waveform": torch.from_numpy(audio).unsqueeze(0).to(torch.float32),
+                "sample_rate": 16000,
+            }
         )
         all_segments.append(diarization_segments)
 
-pipeline.klustering
-pipeline.segmentation_model
 
 output_dict = {}
 output_dict["metadata"] = {
