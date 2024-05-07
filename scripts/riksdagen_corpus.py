@@ -70,7 +70,7 @@ mop["start"] = pd.to_datetime(mop["start"], format="ISO8601")
 mop["end"] = pd.to_datetime(mop["end"], format="ISO8601")
 
 name = pd.read_csv("corpus/metadata/name.csv")
-name = name[name["primary_name"]][["swerik_id", "name"]]
+name = name[name["primary_name"]][["person_id", "name"]]
 person = pd.read_csv("corpus/metadata/person.csv")
 party_affiliation = pd.read_csv("corpus/metadata/party_affiliation.csv")
 party_affiliation["start"] = pd.to_datetime(party_affiliation["start"], format="ISO8601")
@@ -78,7 +78,7 @@ party_affiliation["end"] = pd.to_datetime(party_affiliation["end"], format="ISO8
 
 # Combine rows of people who served for multiple congressional terms
 party_affiliation = (
-    party_affiliation.groupby("swerik_id")
+    party_affiliation.groupby("person_id")
     .agg(
         {
             "start": lambda x: nanmin(x) if not x.isnull().all() else pd.NaT,
@@ -92,7 +92,7 @@ party_affiliation = (
 
 # Combine rows of people who served for multiple congressional terms
 mop = (
-    mop.groupby("swerik_id")
+    mop.groupby("person_id")
     .agg(
         {
             # NaT if all values are NaT otherwise min
@@ -106,10 +106,10 @@ mop = (
 )
 
 # We merge mandate periods of the MOPs with the names of the MOPs
-mop = mop.merge(name, on="swerik_id", how="left")
+mop = mop.merge(name, on="person_id", how="left")
 # Let's also add person-level metadata, such as birth year and gender
-mop = mop.merge(person, on="swerik_id", how="left")
-mop = mop.merge(party_affiliation, on="swerik_id", how="left", suffixes=("", "_party"))
+mop = mop.merge(person, on="person_id", how="left")
+mop = mop.merge(party_affiliation, on="person_id", how="left", suffixes=("", "_party"))
 
 
 # We need a parser for reading in XML data
@@ -124,7 +124,7 @@ for protocol in progressbar.progressbar(protocols):
 
 speeches = [s for s in speeches if s["speech_id"] is not None]
 df_speeches = pd.DataFrame(speeches)
-df_speeches = df_speeches.merge(mop, left_on="speaker_id", right_on="swerik_id", how="left")
+df_speeches = df_speeches.merge(mop, left_on="speaker_id", right_on="person_id", how="left")
 
 # Metadata of some speeches do not conclusively identify a single date
 # when the speech was given, but give multiple possible dates.
@@ -132,4 +132,4 @@ df_speeches = df_speeches.merge(mop, left_on="speaker_id", right_on="swerik_id",
 # speeches with multiple possible dates.
 df_speeches = df_speeches.explode("date").reset_index(drop=True)
 
-df_speeches.to_parquet("data/riksdagen_speeches.parquet", index=False)
+df_speeches.to_parquet("data/riksdagen_speeches_new.parquet", index=False)
