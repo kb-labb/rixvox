@@ -53,7 +53,11 @@ def normalize_text(text):
         lambda m: f"{num2words(int(m.group(1)),lang='sv',ordinal=True)} kapitlet {num2words(int(m.group(2)),lang='sv', ordinal=True)} paragrafen",
         text,
     )
+    # Replace whitespace between numbers with no whitespace: 1 000 000 -> 1000000
+    text = re.sub(r"(\d+) (\d+)", r"\1\2", text)
+
     # TODO: Replace punctuations with whitespace if there is a number before and after it
+    # 3,14 -> 3 14, 4-5 -> 4 5, 4:5 -> 4 5, 4/5 -> 4 5 (closer to the actually pronounced number)
     text = re.sub(r"(\d+)[\.\,\:\-\/](\d+)", r"\1 \2", text)
 
     # Replace § with 'paragrafen' if there is a number before it
@@ -63,12 +67,8 @@ def normalize_text(text):
     text = text.translate(str.maketrans("", "", string.punctuation))
     # Normalize unicode characters
     text = unicodedata.normalize("NFKC", text)
-    # Remove hyphen between words with regex
-    text = re.sub(r"(?<=\w)-(?=\w)", " ", text)
     # remove \r and \n
-    text = re.sub(r"[\r\n]+", " ", text)
-    # Remove multiple spaces and replace with single space
-    text = re.sub(" +", " ", text)
+    text = re.sub(r"\s+", " ", text)
     ## Remove whitespace between numbers
     # text = re.sub(r"(?<=\d) (?=\d)", "", text)
     # # Convert numbers to words

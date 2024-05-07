@@ -234,7 +234,10 @@ def contiguous_fuzzy_match(needle, haystack, threshold=55):
     if align_check.score < threshold and align.score < threshold:
         return None, None, None
 
-    start_index, end_index = get_fuzzy_match_word_indices(haystack, align)
+    try:
+        start_index, end_index = get_fuzzy_match_word_indices(haystack, align)
+    except IndexError:
+        return None, None, None
 
     return start_index, end_index, align_check.score
 
@@ -257,7 +260,6 @@ def contiguous_fuzzy_match_split(needle, haystack, threshold=55, max_length=300)
         start_index, end_index, score = contiguous_fuzzy_match(
             " ".join(needle_split[:max_length]), haystack, threshold=threshold
         )
-
         start_index_end, end_index_end, score_end = contiguous_fuzzy_match(
             " ".join(needle_split[-max_length:]), haystack, threshold=threshold
         )

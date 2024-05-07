@@ -114,7 +114,7 @@ mop = mop.merge(party_affiliation, on="swerik_id", how="left", suffixes=("", "_p
 
 # We need a parser for reading in XML data
 parser = etree.XMLParser(remove_blank_text=True)
-protocols = list(protocol_iterators("corpus/protocols", start=1966, end=2000))
+protocols = list(protocol_iterators("corpus/protocols", start=1965, end=2003))
 
 speeches = []  # 24764
 for protocol in progressbar.progressbar(protocols):
@@ -126,7 +126,10 @@ speeches = [s for s in speeches if s["speech_id"] is not None]
 df_speeches = pd.DataFrame(speeches)
 df_speeches = df_speeches.merge(mop, left_on="speaker_id", right_on="swerik_id", how="left")
 
-# Debates 1991 are held in a single day, so we can just take the first date
-df_speeches["date"] = df_speeches["date"].apply(lambda x: x[0])
+# Metadata of some speeches do not conclusively identify a single date
+# when the speech was given, but give multiple possible dates.
+# We explode the date column to have one row per date for the
+# speeches with multiple possible dates.
+df_speeches = df_speeches.explode("date").reset_index(drop=True)
 
 df_speeches.to_parquet("data/riksdagen_speeches.parquet", index=False)

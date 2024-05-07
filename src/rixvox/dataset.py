@@ -257,5 +257,5 @@ def read_json(json_path):
 
 def read_json_parallel(json_paths, num_workers=6):
     with mp.Pool(num_workers) as pool:
-        sub_dicts = pool.map(read_json, tqdm(json_paths, total=len(json_paths)), chunksize=1)
+        sub_dicts = pool.map(read_json, tqdm(json_paths, total=len(json_paths)), chunksize=20)
     return sub_dicts

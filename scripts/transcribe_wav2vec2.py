@@ -13,6 +13,7 @@ from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
+    read_json_parallel,
     wav2vec_collate_fn,
 )
 
@@ -48,7 +49,8 @@ json_files = glob.glob("data/vad_output/*.json")
 audio_files = []
 vad_dicts = []
 empty_json_files = []
-for json_file in json_files:
+
+for json_file in tqdm(json_files):
     with open(json_file) as f:
         vad_dict = json.load(f)
         if len(vad_dict["chunks"]) == 0:
@@ -73,14 +75,14 @@ dataloader_datasets = torch.utils.data.DataLoader(
     audio_dataset,
     batch_size=1,
     collate_fn=custom_collate_fn,
-    num_workers=2,
+    num_workers=5,
     shuffle=False,
 )
 
 TIME_OFFSET = model.config.inputs_to_logits_ratio / processor.feature_extractor.sampling_rate
 
 for dataset_info in tqdm(dataloader_datasets):
-    if batch is None:
+    if dataset_info is None:
         continue
 
     logging.info(f"Transcribing: {dataset_info[0]['json_path']}.")

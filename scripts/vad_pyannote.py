@@ -46,14 +46,14 @@ def collate_fn(batch):
 if __name__ == "__main__":
 
     vad_pipeline = load_vad_model(
-        model_name_or_path="pyannote/voice-activity-detection",
+        model_name_or_path="pyannote/segmentation-3.0",
         device=device,
         min_duration_on=0.1,
         min_duration_off=0.1,
     )
 
     # Create VAD dataset
-    audio_files = glob.glob("data/**/*.mp3")
+    audio_files = glob.glob("data/audio/**/**/*.mp3")
     dataset = VADAudioDataset(audio_files)
 
     # Create a torch dataloader
@@ -69,7 +69,10 @@ if __name__ == "__main__":
 
         for audio in batch:
             vad_segments = vad_pipeline(
-                {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}
+                {
+                    "waveform": torch.from_numpy(audio).unsqueeze(0).to(torch.float32),
+                    "sample_rate": 16000,
+                }
             )
             vad_segments = merge_chunks(vad_segments, chunk_size=30)
             all_segments.append(vad_segments)
@@ -77,7 +80,7 @@ if __name__ == "__main__":
     # Save VAD output and relevant metadata to JSON
     output_dict = {}
     output_dict["metadata"] = {
-        "vad_model": "pyannote/voice-activity-detection",
+        "vad_model": "pyannote/segmentation-3.0",
         "vad_onset": vad_pipeline.onset,
         "vad_offset": vad_pipeline.offset,
         "vad_min_duration_on": vad_pipeline.min_duration_on,
@@ -97,6 +100,6 @@ if __name__ == "__main__":
         output_dict["chunks"] = segments
         os.makedirs("data/vad_output", exist_ok=True)
         # Extract only filename from audio path
-        audio_path = audio_files[i].split("/")[-1]
-        with open(f"data/vad_output/{audio_path}.json", "w") as f:
+        audio_path = audio_files[i].split("/")[-1].replace(".mp3", ".json")
+        with open(f"data/vad_output/{audio_path}", "w") as f:
             json.dump(output_dict, f, ensure_ascii=False, indent=4)
