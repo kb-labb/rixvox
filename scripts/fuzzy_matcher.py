@@ -120,6 +120,15 @@ def get_timestamps(row):
         logger.error(
             f"IndexError: {row['word_start']}, {row['word_end']}. Total words: {len(row['text_timestamps'])}"
         )
+
+        if len(row["text_timestamps"]) < (row["word_end"] - 1):
+            # In rare cases, the word_end is slightly larger than the length of text_timestamps.
+            # No time to debug what is causing this, so just return the last timestamp
+            return (
+                row["text_timestamps"][row["word_start"]]["start_time"],
+                row["text_timestamps"][-1]["end_time"],
+            )
+
         return -100, -100
 
 
@@ -131,6 +140,7 @@ def preprocess(json_files):
     transcriptions = []
     for json_file in json_files:
         transcriptions.append(read_json(json_file))
+
     df_transcription = preprocess_transcriptions(transcriptions)
     df_audio = concatenate_transcriptions(df_transcription)
     return df_audio
@@ -140,16 +150,34 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--num_workers", type=int, default=12)
     argparser.add_argument("--start_year", type=int, default=1966, help="Inclusive")
-    argparser.add_argument("--end_year", type=int, default=1975, help="Inclusive")
+    argparser.add_argument("--end_year", type=int, default=2002, help="Inclusive")
+    argparser.add_argument(
+        "--second_pass",
+        action="store_true",
+        help="Run second pass on speeches that were not aligned in first pass.",
+    )
+    argparser.add_argument(
+        "--date_margin_addition",
+        type=int,
+        default=21,
+        help="Number of days to add to start and end date range to expand the search space.",
+    )
     args = argparser.parse_args()
 
-    df = pd.read_parquet("data/riksdagen_speeches.parquet")
-    # date as datetime
+    df = pd.read_parquet("data/riksdagen_speeches_new.parquet")
     df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d")
-    # Filter based on date
+
+    # Filter based on date to process only a subset of the data at a time (memory issues)
     df = df[
         (df["date"].dt.year >= args.start_year) & (df["date"].dt.year <= args.end_year)
     ].reset_index(drop=True)
+
+    if args.second_pass:
+        logger.info("Running second pass on speeches that were not aligned in first pass.")
+        df_aligned = pd.read_parquet(f"data/string_aligned_speeches.parquet")
+        # Filter out speeches that were aligned in first pass
+        df = df[~df["speech_id"].isin(df_aligned["speech_id"])].reset_index(drop=True)
+        del df_aligned
 
     with mp.Pool(args.num_workers) as pool:
         df["anftext_normalized"] = list(
@@ -168,6 +196,20 @@ if __name__ == "__main__":
         df_audio = pool.map(preprocess, tqdm(json_files, total=len(json_files)), chunksize=1)
 
     df_audio = pd.concat(df_audio, ignore_index=True)  # inference from audio
+    df_audio.loc[1514, "date_start"] = "2050-05-05"  # Someone set an invalid date...
+    df_audio.loc[1514, "date_end"] = "2050-05-05"
+    df_audio.loc[2605, "date_start"] = "2050-05-05"
+    df_audio.loc[2605, "date_end"] = "2050-05-05"
+    df_audio.loc[5159, "date_start"] = "1996-10-23"
+    df_audio["date_start"] = pd.to_datetime(df_audio["date_start"], format="%Y-%m-%d")
+    df_audio["date_end"] = pd.to_datetime(df_audio["date_end"], format="%Y-%m-%d")
+
+    if args.second_pass:
+        # Subtract the date_margin_addition from date_start and add date_margin_addition to date_end
+        df_audio["date_start"] = df_audio["date_start"] - pd.Timedelta(
+            days=args.date_margin_addition
+        )
+        df_audio["date_end"] = df_audio["date_end"] + pd.Timedelta(days=args.date_margin_addition)
 
     # Possible combinations of speeches and audio files
     df_combinations = date_based_join(df, df_audio)
@@ -206,8 +248,8 @@ if __name__ == "__main__":
         args_fuzzy = zip(
             df_combinations["anftext_normalized"].tolist(),
             df_combinations["inference_normalized"].tolist(),
-            repeat(55),  # threshold
-            repeat(160),  # max_length
+            repeat(55),  # threshold, see contiguous_fuzzy_match_split for details
+            repeat(120),  # max_length
         )
         scores = pool.starmap(
             contiguous_fuzzy_match_split,
@@ -253,6 +295,14 @@ if __name__ == "__main__":
     # Sort by index (their original order in transcripts)
     df_aligned = df_aligned.sort_index().reset_index(drop=True)
     df_aligned = df_aligned.drop(["inference_normalized", "text_timestamps"], axis=1)
-    df_aligned.to_parquet(
-        f"data/string_aligned_speeches_{args.start_year}_{args.end_year}.parquet", index=False
-    )
+    df_aligned["duration"] = df_aligned["end_time"] - df_aligned["start_time"]
+
+    if args.second_pass:
+        df_aligned.to_parquet(
+            f"data/string_aligned_speeches_{args.start_year}_{args.end_year}_second_pass.parquet",
+            index=False,
+        )
+    else:
+        df_aligned.to_parquet(
+            f"data/string_aligned_speeches_{args.start_year}_{args.end_year}.parquet", index=False
+        )

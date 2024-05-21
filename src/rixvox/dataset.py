@@ -250,7 +250,7 @@ def make_transcription_chunks_w2v(
 
 
 def read_json(json_path):
-    with open(json_path) as f:
+    with open(json_path, encoding="utf-8") as f:
         sub_dict = json.load(f)
     return sub_dict
 
