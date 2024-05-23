@@ -1,8 +1,13 @@
 torch
 torchaudio
 transformers
+accelerate
+datasets
+nltk
+jiwer
 soundfile
 whisperx
 pyriksdagen
+tqdm
 rapidfuzz
 ctc_segmentation
