@@ -42,15 +42,23 @@ argparser.add_argument(
     default=8,
     help="Number of GPUs to use. Only used to split the files to process.",
 )
+argparser.add_argument(
+    "--hf_auth_token",
+    type=str,
+    default=None,
+    help="Hugging Face authentication token for downloading models that require authentication (pyannote).",
+)
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
-pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+pipeline = Pipeline.from_pretrained(
+    "pyannote/speaker-diarization-3.1", use_auth_token=args.hf_auth_token
+)
 pipeline.to(device)
 
-audio_files = glob.glob("data/audio/**/**/*.mp3")
-audio_files.extend(glob.glob("data/audio/**/*.mp3"))
+audio_files = glob.glob("/shared/delat/audio/riksdagen/data/riksdagen_old/**/**/*.mp3")
+audio_files.extend(glob.glob("/shared/delat/audio/riksdagen/data/riksdagen_old/**/*.mp3"))
 
 # Split audio files to 8 parts if using 8 GPUs and select the part to process
 # based on the gpu_id argument
@@ -87,6 +95,7 @@ output_dict["metadata"] = {
     "embedding_model": pipeline.embedding,
 }
 
+os.makedirs("/data/faton/riksdagen_old/data/diarization_output", exist_ok=True)
 for i, segments in tqdm(enumerate(all_segments), total=len(all_segments)):
     diarization_dict = []
     output_dict["metadata"]["audio_path"] = audio_files[i]
@@ -102,8 +111,11 @@ for i, segments in tqdm(enumerate(all_segments), total=len(all_segments)):
             }
         )
     output_dict["chunks"] = diarization_dict
-    os.makedirs("data/diarization_output", exist_ok=True)
     # Extract only filename from audio path
     audio_path = audio_files[i].split("/")[-1]
-    with open(f"data/diarization_output/{audio_path}.json", "w", encoding="utf-8") as f:
+    with open(
+        f"/data/faton/riksdagen_old/data/diarization_output/{audio_path}.json",
+        "w",
+        encoding="utf-8",
+    ) as f:
         json.dump(output_dict, f, ensure_ascii=False, indent=4)
