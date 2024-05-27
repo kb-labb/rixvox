@@ -47,6 +47,12 @@ def parse_args():
         default=None,
         help="Hugging Face authentication token for downloading models that require authentication (pyannote).",
     )
+    argparser.add_argument(
+        "--num_threads",
+        type=int,
+        default=10,
+        help="Number of threads Pytorch is allowed to use. Otherwise every process will try use all threads available.",
+    )
     args = argparser.parse_args()
 
     return args
@@ -65,12 +71,13 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
+    torch.set_num_threads(args.num_threads)
+    torch.set_num_interop_threads(args.num_threads * 2)
 
     logging.info(f"Device: {device}. Getting number of threads: {torch.get_num_threads()}")
     logging.info(
         f"Device: {device}. Getting number of interop threads: {torch.get_num_interop_threads()}"
     )
-    # torch.set_num_threads(1)
     logging.info(f"Using device: {device}. Loading pyannote pipeline...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1", use_auth_token=args.hf_auth_token

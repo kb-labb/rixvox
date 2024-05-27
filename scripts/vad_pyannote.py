@@ -44,7 +44,6 @@ def collate_fn(batch):
 
 
 if __name__ == "__main__":
-
     vad_pipeline = load_vad_model(
         model_name_or_path="pyannote/segmentation-3.0",
         device=device,
