@@ -4,6 +4,7 @@ import json
 import logging
 import os
 
+import numpy as np
 import torch
 from tqdm import tqdm
 from transformers import WhisperForConditionalGeneration
@@ -34,6 +35,18 @@ argparser.add_argument(
     Otherwise eager is default. Use flash_attention_2 if you have installed the flash-attention package.""",
 )
 argparser.add_argument("--gpu_id", type=int, default=0)
+argparser.add_argument(
+    "--num_shards",
+    type=int,
+    default=1,
+    help="Number of splits to make for the data. Set to the number of GPUs used.",
+)
+argparser.add_argument(
+    "--data_shard",
+    type=int,
+    default=0,
+    help="Which split of the data to process. 0 to num_shards-1.",
+)
 argparser.add_argument("--max_length", type=int, default=185)
 argparser.add_argument(
     "--overwrite_all", action="store_true", help="Overwrite all existing transcriptions."
@@ -73,6 +86,7 @@ model = WhisperForConditionalGeneration.from_pretrained(
     device_map=device,
 )
 
+audio_files = np.array_split(audio_files, args.num_shards)[args.data_shard]
 audio_dataset = AudioFileChunkerDataset(
     audio_paths=audio_files, json_paths=json_files, model_name=args.model_name
 )

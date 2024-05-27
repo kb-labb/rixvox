@@ -37,10 +37,16 @@ logger = logging.getLogger(__name__)
 argparser = argparse.ArgumentParser()
 argparser.add_argument("--gpu_id", type=int, default=0)
 argparser.add_argument(
-    "--num_gpu",
+    "--num_shards",
     type=int,
-    default=8,
-    help="Number of GPUs to use. Only used to split the files to process.",
+    default=1,
+    help="Number of splits to make for the data. Set to the number of GPUs used.",
+)
+argparser.add_argument(
+    "--data_shard",
+    type=int,
+    default=0,
+    help="Which split of the data to process. 0 to num_shards-1.",
 )
 argparser.add_argument(
     "--hf_auth_token",
@@ -62,7 +68,7 @@ audio_files.extend(glob.glob("/shared/delat/audio/riksdagen/data/riksdagen_old/*
 
 # Split audio files to 8 parts if using 8 GPUs and select the part to process
 # based on the gpu_id argument
-audio_files = np.array_split(audio_files, args.num_gpu)[args.gpu_id]
+audio_files = np.array_split(audio_files, args.num_shards)[args.data_shard]
 dataset = VADAudioDataset(audio_files)
 
 
