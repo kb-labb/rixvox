@@ -66,6 +66,11 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
+    logging.info(f"Device: {device}. Getting number of threads: {torch.get_num_threads()}")
+    logging.info(
+        f"Device: {device}. Getting number of interop threads: {torch.get_num_interop_threads()}"
+    )
+    # torch.set_num_threads(1)
     logging.info(f"Using device: {device}. Loading pyannote pipeline...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1", use_auth_token=args.hf_auth_token
@@ -95,7 +100,9 @@ if __name__ == "__main__":
     logging.info(f"Device: {device}. Entering diarization loop...")
     all_segments = []
     for batch in tqdm(dataloader):
+        logging.info(f"Device: {device}. Batch loaded...")
         for audio in batch:
+            logging.info(f"Device: {device}. Processing audio...")
             diarization_segments = pipeline(
                 {
                     "waveform": torch.from_numpy(audio).unsqueeze(0).to(torch.float32),
