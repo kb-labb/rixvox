@@ -64,9 +64,9 @@ def normalize_text(text):
     text = re.sub(r"(\d+) §", r"\1 paragrafen", text)
     # Replace § with "paragraf" if there is a number after it
     text = re.sub(r"§ (\d+)", r"paragraf \1", text)
-    text = text.translate(str.maketrans("", "", string.punctuation))
     # Normalize unicode characters
     text = unicodedata.normalize("NFKC", text)
+    text = text.translate(str.maketrans("", "", string.punctuation))  # Remove punctuation
     # remove \r and \n
     text = re.sub(r"\s+", " ", text)
     ## Remove whitespace between numbers
