@@ -35,7 +35,8 @@ def expand_abbreviations(text):
 def normalize_text(text):
     """
     Normalize speech text transcript by removing punctuation, converting numbers to words,
-    replacing hyphens joining words with whitespace, and lowercasing the text.
+    replacing hyphens joining words with whitespace, and lowercasing the text. The purpose
+    is to make a normalized source text similar to wav2vec2 output for better string matching.
 
     Args:
         text (str): The text to normalize.
@@ -56,7 +57,7 @@ def normalize_text(text):
     # Replace whitespace between numbers with no whitespace: 1 000 000 -> 1000000
     text = re.sub(r"(\d+) (\d+)", r"\1\2", text)
 
-    # TODO: Replace punctuations with whitespace if there is a number before and after it
+    # Replace punctuations with whitespace if there is a number before and after it
     # 3,14 -> 3 14, 4-5 -> 4 5, 4:5 -> 4 5, 4/5 -> 4 5 (closer to the actually pronounced number)
     text = re.sub(r"(\d+)[\.\,\:\-\/](\d+)", r"\1 \2", text)
 
@@ -67,10 +68,10 @@ def normalize_text(text):
     # Normalize unicode characters
     text = unicodedata.normalize("NFKC", text)
     text = text.translate(str.maketrans("", "", string.punctuation))  # Remove punctuation
-    # remove \r and \n
+    # Replace all non-alphanumeric characters with space
+    text = re.sub(r"[\W]+", " ", text)
+    # remove \r and \n and multiple spaces
     text = re.sub(r"\s+", " ", text)
-    ## Remove whitespace between numbers
-    # text = re.sub(r"(?<=\d) (?=\d)", "", text)
     # # Convert numbers to words
     text = re.sub(r"\d+", lambda m: num2words(int(m.group(0)), lang="sv"), text)
     # Strip leading and trailing whitespace
@@ -285,7 +286,7 @@ def preprocess_text(df, textcol="anftext", is_audio_metadata=False):
     # Normalize text
     df[textcol] = df[textcol].str.normalize("NFKC")  # Normalize unicode characters
     # Remove multiple spaces
-    df[textcol] = df[textcol].str.replace(r"(\s){2,}", " ", regex=True)
+    df[textcol] = df[textcol].str.replace(r"\s+", " ", regex=True)
     # Replace &amp; with &
     df[textcol] = df[textcol].str.replace(r"&amp;", "&", regex=True)
 

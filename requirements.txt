@@ -8,6 +8,8 @@ pyannote.audio
 nltk
 jiwer
 soundfile
+mutagen
+simplejson
 whisperx
 pyriksdagen
 tqdm

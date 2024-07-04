@@ -24,11 +24,12 @@ def get_audio_metadata(rel_dok_id, backoff_factor=0.2):
         dict: Nested metadata fields with transcribed texts, media file
             URLs and more.
     """
-    base_url = "https://data.riksdagen.se/api/mhs-vodapi?"
+
+    api_url = f"https://data.riksdagen.se/dokumentstatus/{rel_dok_id}.json?utformat=json&utdata=debatt,media"
 
     for i in range(3):
         backoff_time = backoff_factor * (2**i)
-        speech_metadata = requests.get(f"{base_url}{rel_dok_id}")
+        speech_metadata = requests.get(api_url)
 
         if speech_metadata.status_code == 200:
 
@@ -66,7 +67,7 @@ def get_audio_metadata(rel_dok_id, backoff_factor=0.2):
 def get_media_file(audiofileurl, backoff_factor=0.2, progress_bar=False):
     """
     Download mp3/mp4 files from riksdagens öppna data.
-    Endpoint https://data.riksdagen.se/api/mhs-vodapi?
+    Endpoint https://data.riksdagen.se/dokumentstatus/{rel_dok_id}.json?utformat=json&utdata=debatt,media
 
     Args:
         audiofileurl (str): Download URL for the mp3 audio file.
@@ -112,7 +113,7 @@ def get_media_file(audiofileurl, backoff_factor=0.2, progress_bar=False):
 def get_media_file_pbar(audiofileurl, backoff_factor=0.2):
     """
     Download mp3/mp4 files from riksdagens öppna data with progress bar.
-    Endpoint https://data.riksdagen.se/api/mhs-vodapi?
+    Endpoint https://data.riksdagen.se/dokumentstatus/{rel_dok_id}.json?utformat=json&utdata=debatt,media
 
     Args:
         audiofileurl (str): Download URL for the mp3 audio file.

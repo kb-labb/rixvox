@@ -19,7 +19,9 @@ def speech_iterator(root):
     """
     us = root.findall(".//{http://www.tei-c.org/ns/1.0}u")
     divs = root.findall(".//{http://www.tei-c.org/ns/1.0}div")
-    protocol_id = root.findall(".//{http://www.tei-c.org/ns/1.0}head")[0].text
+    protocol_id = root.get("{http://www.w3.org/XML/1998/namespace}id")
+    if protocol_id is None:
+        protocol_id = root.get(".//{http://www.tei-c.org/ns/1.0}head")
     docdates = root.findall(".//{http://www.tei-c.org/ns/1.0}docDate")
 
     if len(us) == 0:
@@ -125,11 +127,13 @@ for protocol in progressbar.progressbar(protocols):
 speeches = [s for s in speeches if s["speech_id"] is not None]
 df_speeches = pd.DataFrame(speeches)
 df_speeches = df_speeches.merge(mop, left_on="speaker_id", right_on="person_id", how="left")
+df_speeches["speech_number"] = df_speeches.groupby("protocol_id").cumcount() + 1
 
 # Metadata of some speeches do not conclusively identify a single date
 # when the speech was given, but give multiple possible dates.
 # We explode the date column to have one row per date for the
 # speeches with multiple possible dates.
 df_speeches = df_speeches.explode("date").reset_index(drop=True)
+df_speeches["date"] = pd.to_datetime(df_speeches["date"])
 
 df_speeches.to_parquet("data/riksdagen_speeches_new.parquet", index=False)

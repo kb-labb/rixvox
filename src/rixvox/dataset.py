@@ -159,7 +159,7 @@ class AudioFileChunkerDataset(Dataset):
         return out_dict
 
 
-class VADAudioDataset(torch.utils.data.Dataset):
+class VADAudioDataset(Dataset):
     def __init__(self, files, sr=16000, chunk_size=30):
         self.files = files
         self.sr = sr
@@ -184,6 +184,51 @@ class VADAudioDataset(torch.utils.data.Dataset):
                     f.write(f"{audio_path}\n")
                 return None
         return audio, sr
+
+
+class AlignmentDataset(Dataset):
+    """
+    Pytorch dataset that chunks audio according to start/end times of speech segments,
+    and further chunks the speech segments to 30s chunks.
+
+    Args:
+        df (pd.DataFrame): DataFrame with all speech segments from one audio file.
+        model_name (str): Model name to use for the processor
+    """
+
+    def __init__(self, df, model_name="KBLab/wav2vec2-large-voxrex-swedish"):
+        self.df = df
+        self.model_name = model_name
+        self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+
+    def read_audio(self, audio_path):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            try:
+                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
+                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
+            except Exception as e:
+                print(f"Error reading audio file {audio_path}. {e}")
+                os.makedirs("logs", exist_ok=True)
+                with open("logs/error_audio_files.txt", "a") as f:
+                    f.write(f"{audio_path}\n")
+                return None
+        return audio, sr
+
+    def ms_to_frames(self, ms, sr=16000):
+        return int(ms / 1000 * sr)
+
+    def audio_chunker(self, audio_path, start, end, sr=16000):
+        audio, sr = self.read_audio(audio_path)
+        start_frame = self.ms_to_frames(start, sr)
+        end_frame = self.ms_to_frames(end, sr)
+        return audio[start_frame:end_frame]
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        #### TODO: Redo with json files instead of df ####
+        pass
 
 
 def custom_collate_fn(batch: dict) -> list:

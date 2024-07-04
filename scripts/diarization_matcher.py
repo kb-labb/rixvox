@@ -71,7 +71,7 @@ def find_overlaps(df_fuzzy_group, df_segments, min_overlap=0.0000001):
         df_segment_group["speech_id"] = row["speech_id"]
         df_segment_group["speaker_id"] = row["speaker_id"]
         df_segment_group["protocol_id"] = row["protocol_id"]
-        df_segment_group["anftext_normalized"] = row["anftext_normalized"]
+        df_segment_group["text_normalized"] = row["text_normalized"]
         df_segment_group["start_text_time"] = row["start_time"]
         df_segment_group["end_text_time"] = row["end_time"]
         df_segment_group["fuzzy_score"] = row["score"]
@@ -283,19 +283,24 @@ if __name__ == "__main__":
         how="left",
     )
 
+    df_overlap["start_segment_same"] = (
+        df_overlap.groupby("audio_file")["start_segment"].diff() == 0
+    ) | (df_overlap.groupby("audio_file")["start_segment"].diff(-1) == 0)
+
     df_overlap = df_overlap[
         [
             "speech_id",
             "name",
             "party",
             "text",
-            "anftext_normalized",
+            "text_normalized",
             "start_segment",
             "end_segment",
             "duration_segment",
             "start_text_time",
             "end_text_time",
             "nr_speech_segments",
+            "start_segment_same",
             "overall_score",
             "speaker_id",
             "protocol_id",
@@ -308,15 +313,3 @@ if __name__ == "__main__":
     ]
 
     df_overlap.to_parquet("data/rixvox-alignments.parquet", index=False)
-
-    # #### Extra stuff
-    # df_overlap = pd.read_parquet("data/df_overlap.parquet")
-
-    # df_overlap = df_overlap.sort_values(["audio_file", "speech_segment_id"]).reset_index(drop=True)
-
-    # df_overlap["start_segment_diff"] = df_overlap.groupby("audio_file")["start_segment"].diff()
-    # # Are the start_segment values the same for the current and previous row?
-    # # Are the start_segment values the same for the current and previous row?
-    # df_overlap["start_segment_same"] = (
-    #     df_overlap.groupby("audio_file")["start_segment"].diff() == 0
-    # ) | (df_overlap.groupby("audio_file")["start_segment"].diff(-1) == 0)
