@@ -201,6 +201,7 @@ def preprocess_audio_metadata(speech_metadata):
         ]
     ]
 
+    df = df.rename(columns={"startpos": "start", "anf_sekunder": "duration"})
     df = preprocess_text(df, is_audio_metadata=True)
 
     return df

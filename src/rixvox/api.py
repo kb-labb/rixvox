@@ -1,6 +1,6 @@
+import json
 import os
 import time
-from json import loads
 
 import requests
 from tqdm import tqdm
@@ -34,20 +34,23 @@ def get_audio_metadata(rel_dok_id, backoff_factor=0.2):
         if speech_metadata.status_code == 200:
 
             try:
-                speech_metadata = loads(speech_metadata.text)
+                speech_metadata = json.loads(speech_metadata.text)
             except Exception as e:
                 print(f"JSON decoding failed for rel_dok_id {rel_dok_id}. \n")
                 print(e)
                 return None
 
-            if "speakers" not in speech_metadata["videodata"][0]:
+            # Check if speech_metadata["dokumentstatus"]["debatt"]["anforande"] exists
+            if "debatt" not in speech_metadata["dokumentstatus"]:
                 return None
 
-            if speech_metadata["videodata"][0]["streams"] is None:
+            if "webbmedia" not in speech_metadata["dokumentstatus"]:
                 print(
-                    f"rel_dok_id {rel_dok_id} has no streams (media files).", end="\r", flush=True
+                    f"rel_dok_id {rel_dok_id} has no media files (webbmedia).",
+                    end="\r",
+                    flush=True,
                 )
-                return None
+                return
 
             df = preprocess_audio_metadata(speech_metadata)
             df["rel_dok_id"] = rel_dok_id
