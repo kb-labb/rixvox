@@ -167,34 +167,37 @@ def preprocess_audio_metadata(speech_metadata):
         pd.DataFrame: A pandas dataframe with the relevant metadata fields.
     """
 
-    df = pd.DataFrame(speech_metadata["videodata"])
-    df = df.explode("speakers").reset_index(drop=True)
-    df_files = pd.json_normalize(df["streams"], ["files"])
-    df_speakers = pd.json_normalize(df["speakers"])
-    df = df.drop(columns=["streams", "speakers"])
-    df = pd.concat([df, df_files], axis=1)
-    df = pd.concat([df, df_speakers], axis=1)
+    df = pd.json_normalize(
+        speech_metadata,
+        record_path=["dokumentstatus", "debatt", "anforande"],
+        meta=[["dokumentstatus", "webbmedia"]],
+    )
+    df_media = df["dokumentstatus.webbmedia"].apply(pd.Series)["media"].apply(pd.Series)
+    df_dokument = pd.json_normalize(speech_metadata["dokumentstatus"]["dokument"])
+    df = pd.concat([df, df_media], axis=1)
+    df["debatt_namn"] = df_dokument["debattnamn"]
 
     df = df[
         [
-            "dokid",
-            "party",
-            "start",
-            "duration",
-            "debateseconds",
-            "title",
-            "text",
-            "debatename",
-            "debatedate",
+            "dok_id",
+            "parti",
+            "startpos",
+            "anf_sekunder",
+            "debatt_titel",
+            "anf_text",
+            "debatt_namn",
+            "anf_datum",
             "url",
             "debateurl",
-            "id",
-            "subid",
+            "debatt_id",
             "audiofileurl",
-            "downloadfileurl",
-            "debatetype",
-            "number",
-            "anftext",
+            "downloadurl",
+            "debatt_typ",
+            "anf_nummer",
+            "anf_nummer2",
+            "intressent_id",
+            "intressent_id2",
+            "anf_id",
         ]
     ]
 
