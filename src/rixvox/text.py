@@ -207,7 +207,7 @@ def preprocess_audio_metadata(speech_metadata):
     return df
 
 
-def preprocess_text(df, textcol="anftext", is_audio_metadata=False):
+def preprocess_text(df, textcol="anf_text", is_audio_metadata=False):
     """
     Preprocess the text field on modern Swedish parliament speeches retrieved from the
     Riksdagen API.
