@@ -6,14 +6,13 @@ import os
 
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCTC, Wav2Vec2CTCTokenizer, Wav2Vec2Processor
+from transformers import AutoModelForCTC, Wav2Vec2Processor
 
-from rixvox.ctc_segmentation import get_word_timestamps_hf
+from rixvox.alignment import get_word_timestamps_hf
 from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
-    read_json_parallel,
     wav2vec_collate_fn,
 )
 

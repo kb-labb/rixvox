@@ -14,6 +14,33 @@ from transformers import Wav2Vec2Processor, WhisperProcessor
 from rixvox.audio import convert_audio_to_wav
 
 
+class VADAudioDataset(Dataset):
+    def __init__(self, files, sr=16000, chunk_size=30):
+        self.files = files
+        self.sr = sr
+        self.chunk_size = chunk_size
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        audio, sr = self.read_audio(self.files[idx])
+        return audio
+
+    def read_audio(self, audio_path):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            try:
+                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
+                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
+            except Exception as e:
+                print(f"Error reading audio file {audio_path}. {e}")
+                os.makedirs("logs", exist_ok=True)
+                with open("logs/error_audio_files.txt", "a") as f:
+                    f.write(f"{audio_path}\n")
+                return None
+        return audio, sr
+
+
 class AudioDataset(Dataset):
     """
     Takes multiple spectograms and returns one spectogram at a time.
@@ -137,7 +164,8 @@ class AudioFileChunkerDataset(Dataset):
             )
 
         if "whisper" in self.model_name:
-            # Wav2vec2 processor doesn't pad up to 30s by default
+            # Wav2vec2 processor doesn't pad up to 30s by default (meaning we can't cat its tensors together here)
+            # We handle padding and batching for wav2vec2 in the collate function instead.
             spectograms = torch.cat(spectograms, dim=0)
 
         mel_dataset = AudioDataset(spectograms, sub_dict)
@@ -159,76 +187,92 @@ class AudioFileChunkerDataset(Dataset):
         return out_dict
 
 
-class VADAudioDataset(Dataset):
-    def __init__(self, files, sr=16000, chunk_size=30):
-        self.files = files
-        self.sr = sr
-        self.chunk_size = chunk_size
-
-    def __len__(self):
-        return len(self.files)
-
-    def __getitem__(self, idx):
-        audio, sr = self.read_audio(self.files[idx])
-        return audio
-
-    def read_audio(self, audio_path):
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            try:
-                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
-                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
-            except Exception as e:
-                print(f"Error reading audio file {audio_path}. {e}")
-                os.makedirs("logs", exist_ok=True)
-                with open("logs/error_audio_files.txt", "a") as f:
-                    f.write(f"{audio_path}\n")
-                return None
-        return audio, sr
-
-
-class AlignmentDataset(Dataset):
+class AlignmentChunkerDataset(AudioFileChunkerDataset):
     """
     Pytorch dataset that chunks audio according to start/end times of speech segments,
     and further chunks the speech segments to 30s chunks.
 
     Args:
-        df (pd.DataFrame): DataFrame with all speech segments from one audio file.
+        json_paths (list): List of paths to json files
         model_name (str): Model name to use for the processor
+        audio_dir (str): Directory with audio files
+        sr (int): Sample rate
+        chunk_size (int): Chunk size in seconds to split audio into
     """
 
-    def __init__(self, df, model_name="KBLab/wav2vec2-large-voxrex-swedish"):
-        self.df = df
-        self.model_name = model_name
-        self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+    def __init__(
+        self,
+        json_paths,
+        model_name="KBLab/wav2vec2-large-voxrex-swedish",
+        audio_dir="data/audio/all",
+        sr=16000,  # sample rate
+        chunk_size=30,  # seconds per chunk for wav2vec2
+    ):
+        audio_paths = [
+            os.path.join(audio_dir, os.path.basename(j).replace(".json", ".mp3"))
+            for j in json_paths
+        ]
+        # Inherit methods from AudioFileChunkerDataset
+        super().__init__(json_paths=json_paths, audio_paths=audio_paths, model_name=model_name)
+        self.sr = sr
+        self.chunk_size = chunk_size
 
-    def read_audio(self, audio_path):
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            try:
-                convert_audio_to_wav(audio_path, os.path.join(tmpdirname, "tmp.wav"))
-                audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
-            except Exception as e:
-                print(f"Error reading audio file {audio_path}. {e}")
-                os.makedirs("logs", exist_ok=True)
-                with open("logs/error_audio_files.txt", "a") as f:
-                    f.write(f"{audio_path}\n")
-                return None
-        return audio, sr
+    def seconds_to_frames(self, seconds, sr=16000):
+        return int(seconds * sr)
 
-    def ms_to_frames(self, ms, sr=16000):
-        return int(ms / 1000 * sr)
+    def json_chunks(self, sub_dict):
+        for speech in sub_dict["speeches"]:
+            yield speech["speech_id"], speech["start_segment"], speech["end_segment"]
 
-    def audio_chunker(self, audio_path, start, end, sr=16000):
+    def audio_chunker(self, audio_path, sub_dict, sr=16000):
         audio, sr = self.read_audio(audio_path)
-        start_frame = self.ms_to_frames(start, sr)
-        end_frame = self.ms_to_frames(end, sr)
-        return audio[start_frame:end_frame]
+        i = 0
+        for speech_id, start, end in self.json_chunks(sub_dict):
+            start_frame = self.seconds_to_frames(start, sr)
+            end_frame = self.seconds_to_frames(end, sr)
+            sub_dict["speeches"][i]["audio_frames"] = end_frame - start_frame
+            i += 1
+            yield speech_id, audio[start_frame:end_frame]
+
+    def check_if_aligned(self, sub_dict):
+        """
+        We include information about whether alignment has already been performed.
+        Useful for skipping already aligned files.
+        """
+        is_aligned = "subs" in sub_dict
+        return is_aligned
 
     def __len__(self):
-        return len(self.df)
+        return len(self.json_paths)
 
     def __getitem__(self, idx):
-        #### TODO: Redo with json files instead of df ####
-        pass
+        audio_path = self.audio_paths[idx]
+        json_path = self.json_paths[idx]
+
+        with open(json_path) as f:
+            sub_dict = json.load(f)
+
+        spectograms = []
+        for speech_id, audio_speech in self.audio_chunker(audio_path, sub_dict):
+            audio_speech = torch.tensor(audio_speech).unsqueeze(0)  # Add batch dimension
+            audio_chunks = torch.split(audio_speech, self.chunk_size * self.sr, dim=1)  # 30s
+            for audio_chunk in audio_chunks:
+                spectogram = self.processor(
+                    audio_chunk, sampling_rate=self.sr, return_tensors="pt"
+                ).input_values
+                # Create tuple with spectogram and speech_id so we can link back to the speech
+                spectograms.append((spectogram, speech_id))
+
+        mel_dataset = AudioDataset(spectograms, sub_dict)
+
+        out_dict = {
+            "dataset": mel_dataset,
+            "metadata": sub_dict["metadata"],
+            "audio_path": audio_path,
+            "json_path": json_path,
+        }
+
+        return out_dict
 
 
 def custom_collate_fn(batch: dict) -> list:
@@ -246,18 +290,45 @@ def custom_collate_fn(batch: dict) -> list:
     return batch
 
 
+def pad_to_min_length(vec):
+    audio_frames = torch.as_tensor(vec.shape[-1]).to(vec.device)
+    if audio_frames < 640:
+        vec = torch.nn.functional.pad(vec, (0, 640 - audio_frames))
+
+    return vec
+
+
 def wav2vec_collate_fn(batch):
     """
     We need to pad the input_values to the longest sequence,
     since wav2vec2 doesn't do this by default.
     """
     # Remove None values
-    batch = [b[0] for b in batch if b is not None]
+    batch = [pad_to_min_length(b[0]) for b in batch if b is not None]
 
     # Pad the input_values to the longest sequence
     batch = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=0)
 
     return batch
+
+
+def alignment_collate_fn(batch):
+    """
+    We need to pad the input_values to the longest sequence,
+    since wav2vec2 doesn't do this by default.
+    The individual elements in the batch are tuples: (spectogram, speech_id)
+    """
+    # Remove None values
+    speech_ids = [b[1] for b in batch if b is not None]
+    batch = [pad_to_min_length(b[0][0].squeeze(0)) for b in batch if b is not None]
+
+    # Pad the input_values to the longest sequence
+    batch = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=0)
+
+    return {
+        "spectograms": batch,
+        "speech_ids": speech_ids,
+    }
 
 
 def make_transcription_chunks(
