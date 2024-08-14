@@ -15,7 +15,6 @@ from rixvox.dataset import (
     AlignmentChunkerDataset,
     alignment_collate_fn,
     custom_collate_fn,
-    read_json_parallel,
 )
 
 os.makedirs("logs", exist_ok=True)
@@ -44,35 +43,29 @@ argparser.add_argument(
 argparser.add_argument(
     "--sample_rate", type=int, default=16000, help="Sample rate of the audio files."
 )
+argparser.add_argument(
+    "--data_shard",
+    type=int,
+    default=0,
+    help="Which split of the data to process. 0 to num_shards-1.",
+)
+
+argparser.add_argument(
+    "--num_shards",
+    type=int,
+    default=1,
+    help="Number of splits to make for the data. Set to the number of GPUs used.",
+)
 
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 json_files = glob.glob("data/speeches_by_audiofile/*")
-diarization_dicts = read_json_parallel(json_files, num_workers=10)
 
-audio_files = []
-for diarization_dict in diarization_dicts:
-    audio_file = os.path.join(args.audio_dir, diarization_dict["metadata"]["audio_file"])
-    audio_files.append(audio_file)
-
-
-def get_speaking_rate(diarization_dict):
-    for speech in diarization_dict["speeches"]:
-        word_count = len(speech["text"].split())
-        duration_segment = speech["duration_segment"]
-        # Dict changes in place
-        speech["word_count"] = word_count
-        speech["words_per_sec"] = word_count / duration_segment
-
-    return diarization_dict
-
-
-with mp.Pool(10) as pool:
-    diarization_dicts = pool.map(
-        get_speaking_rate, tqdm(diarization_dicts, total=len(diarization_dicts)), chunksize=20
-    )
+# Split audio files to 8 parts if using 8 GPUs and select the part to process
+# based on the gpu_id argument
+json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
 
 model = AutoModelForCTC.from_pretrained(args.model_name, torch_dtype=torch.float16).to(device)
 audio_dataset = AlignmentChunkerDataset(json_paths=json_files, model_name=args.model_name)
@@ -93,7 +86,7 @@ for dataset_info in tqdm(dataloader_datasets):
     if dataset_info is None:
         continue
 
-    logging.info(f"Creating output probs for: {dataset_info[0]['json_path']}.")
+    logging.info(f"Creating output probs for: {dataset_info[0]['json_path']} on {device}.")
 
     dataset = dataset_info[0]["dataset"]
     dataloader_mel = torch.utils.data.DataLoader(
