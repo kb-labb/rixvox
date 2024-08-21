@@ -66,14 +66,24 @@ def align(vad_dict):
 
         probs = np.load(os.path.join(args.probs_dir, speech["probs_file"]), allow_pickle=True)
 
-        alignment = align_with_transcript(
-            transcripts=normalized_transcript,
-            probs=probs,
-            audio_frames=speech["audio_frames"],
-            processor=processor,
-            samplerate=16000,
-            chunk_size=30,
-        )
+        try:
+            alignment = align_with_transcript(
+                transcripts=normalized_transcript,
+                probs=probs,
+                audio_frames=speech["audio_frames"],
+                processor=processor,
+                samplerate=16000,
+                chunk_size=30,
+            )
+        except Exception as e:
+            logger.error(f"Failed to align {speech['probs_file']}: {e}")
+            logger.info(
+                f"Inserting empty alignment for {speech['probs_file']} in {vad_dict['metadata']['audio_file']}"
+            )
+            alignment = [
+                {"start_segment": None, "end_segment": None, "text": ""}
+                for _ in transcript_tokenized
+            ]
 
         for i, segment in enumerate(alignment):
             segment["start"] += float(speech["start_segment"])

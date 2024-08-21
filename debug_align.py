@@ -26,7 +26,7 @@ def align_pytorch(transcripts, emissions, device):
     alignments, scores = F.forced_align(emissions, targets, blank=0)
 
     alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
-    scores = scores.exp()  # convert back to probability
+    # scores = scores.exp()  # convert back to probability
     return alignments, scores
 
 
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     audio_frames = []
     for speech_metadata in tqdm(speeches_metadata):
         # Run transcription but only keep the probabilities for alignment
-        probs, audio_length = get_probs(speech_metadata, pad=True, logits_only=True)
+        probs, audio_length = get_probs(speech_metadata, pad=True, logits_only=False)
         align_probs.append(probs)
         audio_frames.append(audio_length)
 
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     for s in token_spans:
         # Decode
         decoded = processor.decode(s.token)
-        print(f"{s.start} - {s.end}: {decoded}")
+        print(f"{s.start} - {s.end} - {s.score}: {decoded}")
 
     for alignment in alignments[18]:
         decoded = processor.decode(alignment)
