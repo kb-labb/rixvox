@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from pprint import pprint
 
 import numpy as np
 from num2words import num2words
@@ -81,7 +82,7 @@ def collect_regex_patterns(user_patterns=None):
             # Replace digits with words
             {
                 "pattern": r"(\d+)",
-                "replacement": lambda m: num2words(int(m.group(0)), lang="sv"),
+                "replacement": lambda m: num2words(int(m.group(1)), lang="sv"),
                 "transformation_type": "substitution",
             },
         ]
@@ -171,7 +172,9 @@ def apply_transformations(text, mapping):
     return normalized_text
 
 
-def normalize_text_with_mapping(text, user_substitutions=None, user_deletions=None):
+def normalize_text_with_mapping(
+    text, user_substitutions=None, user_deletions=None, combine_regexes=False
+):
     """
     Normalize speech text transcript while keeping track of transformations.
 
@@ -199,13 +202,13 @@ def normalize_text_with_mapping(text, user_substitutions=None, user_deletions=No
 
             # If pattern_dict["replacement"] is a lambda function, call it to get the replacement
             if callable(pattern_dict["replacement"]):
-                pattern_dict["replacement"] = pattern_dict["replacement"](match)
+                replacement = pattern_dict["replacement"](match)
+            else:
+                replacement = pattern_dict["replacement"]
 
-            record_transformation(
-                mapping, text, start, end, transformation_type, pattern_dict["replacement"]
-            )
+            record_transformation(mapping, text, start, end, transformation_type, replacement)
 
-    text = unicodedata.normalize("NFKD", text)
+    text = unicodedata.normalize("NFKC", text)
 
     # Apply the recorded transformations to the text
     normalized_text = apply_transformations(text, mapping)
@@ -220,3 +223,22 @@ pprint(
         "Vi har bl.a. sett kungl. maj:t vinka till oss - det gjorde han bra. Kungl. maj:t vad glad när han fick 20243 kronor. Den finns i 4 kap. 7 § i lagen.",
     )
 )
+
+text = "Vi har bl.a. sett kungl. maj:t vinka till oss - det gjorde han bra. Kungl. maj:t vad glad nääär han fick 20243 kronor. Den finns i 4 kap. 7 § i lagen."
+# Perform NFKD normalization
+norm_text = unicodedata.normalize("NFKC", text)
+len(text)
+len(norm_text)
+
+# combined regex with named groups
+pattern = r"(?P<part1>bl\.a\.)|(?P<part2>[^\w\s])"
+
+# Find all matches for the pattern in the text
+matches = re.finditer(pattern, text)
+
+m = list(matches)
+m[0].groupdict()
+m[0]
+
+m[2].groupdict()
+m[0].start(), m[0].end()
