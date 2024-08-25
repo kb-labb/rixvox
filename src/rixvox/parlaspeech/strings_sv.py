@@ -1,21 +1,24 @@
 # Normalize variations of abbreviations
+
+# These aren't escaped in code, so they need to be escaped here
 ocr_corrections = {
-    "$": "§",
-    "bl.a": "bl.a.",
-    "d.v.s ": "d.v.s. ",
-    "d. v.s.": "d.v.s.",
-    "fr.o.m": "fr.o.m.",
-    "kungl. maj: t": "kungl. maj:t",
-    "m. m.": "m.m.",
-    "m.m ": "m.m. ",
-    "m. fl.": "m.fl.",
-    "milj. kr.": "milj.kr.",
-    "o. s.v.": "o.s.v.",
-    "s. k.": "s.k.",
-    "t.o.m,": "t.o.m.",
-    "t.o. m.": "t.o.m.",
+    "\$": "§",
+    "bl\.a ": "bl.a.",
+    "[D|d]\.v\.s ": "d.v.s. ",
+    "[D|d]\. v\.s.": "d.v.s.",
+    "[F|f]r\.o\.m ": "fr.o.m.",
+    "[K|k]ungl\. maj\: t": "kungl. maj:t",
+    "m\. m\.": "m.m.",
+    "m\.m ": "m.m. ",
+    "m\. fl\.": "m.fl.",
+    "milj\. kr.": "milj.kr.",
+    "o\. s\.v\.": "o.s.v.",
+    "s\. k\.": "s.k.",
+    "t\.o\.m,": "t.o.m.",
+    "t\.o\. m\.": "t.o.m.",
 }
 
+# Escaped in code, so they don't need to be escaped here
 abbreviations = {
     "bl.a.": "bland annat",
     "d.v.s.": "det vill säga",

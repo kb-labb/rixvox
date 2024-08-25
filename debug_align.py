@@ -14,7 +14,11 @@ from nltk.tokenize import sent_tokenize
 from tqdm import tqdm
 from transformers import AutoModelForCTC, Wav2Vec2Processor
 
-from rixvox.text import normalize_text
+from rixvox.text import (
+    add_timestamps_to_mapping,
+    get_normalized_tokens,
+    normalize_text_with_mapping,
+)
 
 
 def align_pytorch(transcripts, emissions, device):
