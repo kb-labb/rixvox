@@ -234,7 +234,7 @@ def normalize_text_with_mapping(text, user_patterns=None, combine_regexes=False)
 
     # Correct some OCR-errors before normalization
     for key, value in ocr_corrections.items():
-        text = text.replace(key, value)
+        text = re.sub(key, value, text)
 
     # Collect all regex patterns for substitutions and deletions
     transformations = collect_regex_patterns(user_patterns)
