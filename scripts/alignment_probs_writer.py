@@ -110,7 +110,7 @@ for dataset_info in tqdm(dataloader_datasets):
         with torch.inference_mode():
             logits = model(spectograms).logits
 
-        probs = torch.nn.functional.softmax(logits, dim=-1)  # Need for CTC segmentation
+        probs = torch.nn.functional.softmax(logits, dim=-1)  # Need for alignment
         probs = probs.cpu().numpy()
 
         if probs.shape[0] == 1:

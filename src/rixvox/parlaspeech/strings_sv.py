@@ -14,6 +14,7 @@ ocr_corrections = {
     "milj\. kr.": "milj.kr.",
     "o\. s\.v\.": "o.s.v.",
     "s\. k\.": "s.k.",
+    "t\. ex\.": "t.ex.",
     "t\.o\.m,": "t.o.m.",
     "t\.o\. m\.": "t.o.m.",
 }

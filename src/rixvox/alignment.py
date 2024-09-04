@@ -110,7 +110,7 @@ def calculate_w2v_output_length(
     conv_stride: list[int] = [5, 2, 2, 2, 2, 2, 2],
     sample_rate: int = 16000,
     frames_first_logit: int = 400,
-) -> int:
+):
     """
     Calculate the number of output characters from the wav2vec2 model based
     on the chunking strategy and the number of audio frames.
@@ -123,21 +123,27 @@ def calculate_w2v_output_length(
     drift over time for long audio files when chunking the audio for batched inference.
 
     Args:
-        audio_frames: Number of audio frames in the audio file, or part of audio file
-            to be aligned.
-        chunk_size: Number of seconds to chunk the audio by for batched inference.
-        conv_stride: The convolutional stride of the wav2vec2 model
-            (see model.config.conv_stride). The product sum of the list is the number
-            of audio frames per output logit. Defaults to the conv_stride of
-            wav2vec2-large.
-        sample_rate: The sample rate of the w2v processor, default 16000.
-        frames_first_logit: First logit consists of more frames than the rest.
-            Wav2vec2-large outputs the first logit after 400 frames.
+        audio_frames:
+            Number of audio frames in the audio file, or part of audio file to be aligned.
+        chunk_size:
+            Number of seconds to chunk the audio by for batched inference.
+        conv_stride:
+            The convolutional stride of the wav2vec2 model (see model.config.conv_stride).
+            The product sum of the list is the number of audio frames per output logit.
+            Defaults to the conv_stride of wav2vec2-large.
+        sample_rate:
+            The sample rate of the w2v processor, default 16000.
+        frames_first_logit:
+            First logit consists of more frames than the rest. Wav2vec2-large outputs
+            the first logit after 400 frames.
+
+    Returns:
+        The number of logit outputs for the audio file.
     """
-    frames_per_logit = np.prod(conv_stride)
+    frames_per_logit = np.prod(conv_stride)  # 320 for wav2vec2-large
     extra_frames = frames_first_logit - frames_per_logit
 
-    frames_per_full_chunk = chunk_size * sample_rate
+    frames_per_full_chunk = chunk_size * sample_rate  # total frames for chunk_size seconds
     n_full_chunks = audio_frames // frames_per_full_chunk
 
     # Calculate the number of logit outputs for the full size chunks
@@ -150,7 +156,8 @@ def calculate_w2v_output_length(
     if n_last_chunk_frames == 0:
         n_last_chunk_logits = 0
     elif n_last_chunk_frames < frames_first_logit:
-        # We'll pad the last chunk to 400 frames if it's shorter than the model's minimum input length
+        # We'll pad the last chunk up to 400 frames if it happens to be shorter
+        # than the model's minimum input length (otherwise model will throw an error).
         n_last_chunk_logits = 1
     else:
         n_last_chunk_logits = (n_last_chunk_frames - extra_frames) // frames_per_logit

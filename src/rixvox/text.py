@@ -270,12 +270,15 @@ def normalize_text_with_mapping(text, user_patterns=None, combine_regexes=False)
     # Apply the recorded transformations to the text
     normalized_text = apply_transformations(text, mapping)
 
-    return normalized_text, mapping
+    return normalized_text, mapping, text
 
 
 def get_normalized_tokens(mapping, casing="lower"):
     normalized_mapping = OrderedDict()
     normalized_tokens = []
+    # Multi-word offsets, since expanded numbers/abbreviations still remain as one token in the mapping:
+    # e.g. "bl.a." -> "bland annat"
+    offset = 0
     for i, record in enumerate(mapping):
         if record["transformation_type"] == "substitution" and record["replacement"] != " ":
             normalized_token = (
@@ -283,12 +286,31 @@ def get_normalized_tokens(mapping, casing="lower"):
                 if casing == "lower"
                 else record["normalized_token"].upper()  # Swedish wav2vec2 has uppercase tokens
             )
-            normalized_mapping[i] = {
-                "token": normalized_token,
-                "start_time": record["start_time"],  # Empty for now
-                "end_time": record["end_time"],  # Empty for now
-            }
-            normalized_tokens.append(normalized_token)
+
+            if " " in normalized_token:
+                multi_tokens = normalized_token.split(" ")
+                for multi_word_index, token in enumerate(multi_tokens):
+                    normalized_tokens.append(token)
+                    offset += 1 if multi_word_index >= 1 else 0
+                    normalized_mapping[i + offset] = {
+                        "token": token,
+                        "start_time": record["start_time"],  # Empty for now
+                        "end_time": record["end_time"],  # Empty for now
+                        "normalized_word_index": i,
+                        "is_multi_word": True,
+                        "is_first_word": multi_word_index == 0,
+                        "is_last_word": multi_word_index == len(multi_tokens) - 1,
+                    }
+            else:
+                normalized_mapping[i + offset] = {
+                    "token": normalized_token,
+                    "start_time": record["start_time"],  # Empty for now
+                    "end_time": record["end_time"],  # Empty for now
+                    "normalized_word_index": i,
+                    "is_multi_word": False,
+                }
+                normalized_tokens.append(normalized_token)
+
     return normalized_mapping, normalized_tokens
 
 
