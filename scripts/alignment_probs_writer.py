@@ -114,17 +114,17 @@ for dataset_info in tqdm(dataloader_datasets):
         probs = probs.cpu().numpy()
 
         if probs.shape[0] == 1:
-            # Pad the second dimension to args.chunk_size * args.sample_rate.
+            # Pad the second dimension up to the nr_logits that args.chunk_size * args.sample_rate yields.
             # Usually collate_fn takes care of this when batch contains more
             # than 1 obs, but we need to handle the case when a batch contains only 1 obs.
-            frames = calculate_w2v_output_length(
+            nr_logits = calculate_w2v_output_length(
                 args.chunk_size * args.sample_rate, args.chunk_size
             )
             probs = np.pad(
                 array=probs,
                 pad_width=(
                     (0, 0),
-                    (0, frames - probs.shape[1]),
+                    (0, nr_logits - probs.shape[1]),  # Add remaining logits as padding
                     (0, 0),
                 ),
                 mode="constant",

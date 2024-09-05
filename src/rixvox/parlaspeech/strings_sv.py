@@ -3,7 +3,8 @@
 # These aren't escaped in code, so they need to be escaped here
 ocr_corrections = {
     "\$": "§",
-    "bl\.a ": "bl.a.",
+    "bl\. a\.": "bl.a.",
+    "bl\.a(?= )": "bl.a.",
     "[D|d]\.v\.s ": "d.v.s. ",
     "[D|d]\. v\.s.": "d.v.s.",
     "[F|f]r\.o\.m ": "fr.o.m.",
@@ -16,7 +17,7 @@ ocr_corrections = {
     "s\. k\.": "s.k.",
     "t\. ex\.": "t.ex.",
     "t\.o\.m,": "t.o.m.",
-    "t\.o\. m\.": "t.o.m.",
+    "t\. ?o\. ?m\.?": "t.o.m.",
 }
 
 # Escaped in code, so they don't need to be escaped here

@@ -1,21 +1,24 @@
 import argparse
 import glob
 import logging
-import multiprocessing as mp
 import os
 import re
 
 import numpy as np
 import simplejson as json
 import torch
-import torchaudio.functional as F
-from nltk.tokenize import sent_tokenize
+import torch.multiprocessing as mp
+from nltk.data import load
 from tqdm import tqdm
 from transformers import AutoModelForCTC, Wav2Vec2Processor
 
-from rixvox.alignment import align_with_transcript
+from rixvox.alignment import (
+    add_timestamps_to_mapping,
+    get_alignments_and_scores,
+    get_sentence_alignment,
+    map_text_to_tokens,
+)
 from rixvox.dataset import read_json_parallel
-from rixvox.text import get_normalized_tokens, normalize_text_with_mapping
 
 
 def align_pytorch(transcripts, emissions, device):
@@ -29,6 +32,17 @@ def align_pytorch(transcripts, emissions, device):
     alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
     # scores = scores.exp()  # convert back to probability
     return alignments, scores
+
+
+def format_timestamp(timestamp):
+    """
+    Convert timestamp in seconds to "hh:mm:ss:ms" format.
+    """
+    hours = int(timestamp // 3600)
+    minutes = int((timestamp % 3600) // 60)
+    seconds = int(timestamp % 60)
+    milliseconds = int((timestamp % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 
 os.makedirs("logs", exist_ok=True)
@@ -46,104 +60,111 @@ argparser = argparse.ArgumentParser()
 argparser.add_argument(
     "--probs_dir", type=str, default="data/probs", help="Path to directory with probs."
 )
+argparser.add_argument(
+    "--device",
+    type=str,
+    default="cuda",
+    choices=["cuda", "cpu"],
+    help="Device to run the model on. Default: cuda.",
+)
+argparser.add_argument(
+    "--num_workers",
+    type=int,
+    default=24,
+    help="Number of workers to use for multiprocessing if device is set to cpu.",
+)
+argparser.add_argument(
+    "--input_dir",
+    type=str,
+    default="data/speeches_by_audiofile",
+    help="Path to directory with json files.",
+)
+argparser.add_argument(
+    "--output_dir",
+    type=str,
+    default="data/speeches_by_audiofile_aligned",
+    help="Path to directory to save aligned json files.",
+)
+argparser.add_argument(
+    "--data_shard",
+    type=int,
+    default=0,
+    help="Which split of the data to process. 0 to num_shards-1.",
+)
+argparser.add_argument(
+    "--num_shards",
+    type=int,
+    default=1,
+    help="Number of splits to make for the data. Set to the number of GPUs used.",
+)
+argparser.add_argument(
+    "--chunk_size",
+    type=int,
+    default=30,
+    help="Number of seconds the audio was chunked by when performing inference in previous scripts.",
+)
 
 args = argparser.parse_args()
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model = AutoModelForCTC.from_pretrained(
-    "KBLab/wav2vec2-large-voxrex-swedish", torch_dtype=torch.float16
-).to(device)
-processor = Wav2Vec2Processor.from_pretrained(
-    "KBLab/wav2vec2-large-voxrex-swedish", sample_rate=16000, return_tensors="pt"
-)
+def align_and_save(json_dict):
+    try:  # Align the speech
+        logger.info(f"Aligning {json_dict['metadata']['audio_file']}")
+        mappings = map_text_to_tokens(json_dict)
+        alignments, alignment_scores = get_alignments_and_scores(
+            json_dict=json_dict,
+            mappings=mappings,
+            processor=processor,
+            probs_dir=args.probs_dir,
+            device=args.device,
+        )
+        mappings = add_timestamps_to_mapping(
+            json_dict, mappings, alignments, alignment_scores, chunk_size=args.chunk_size
+        )
+        json_dict = get_sentence_alignment(json_dict, mappings, tokenizer)
+    except Exception as e:
+        logger.error(f"Failed to align a speech in {json_dict['metadata']['audio_file']}: {e}")
 
-json_files = glob.glob("data/speeches_by_audiofile/*")
-aligned_files = glob.glob(args.probs_dir + "/*")
-aligned_files = [os.path.basename(f) + ".json" for f in aligned_files]
-
-json_files = [f for f in json_files if os.path.basename(f) in aligned_files]
-json_dicts = read_json_parallel(json_files, num_workers=10)
-
-json_dicts[0]["speeches"][0]["text"]
-
-
-mappings = []
-for i, speech in enumerate(json_dicts[0]["speeches"]):
-    normalized_text, mapping, original_text = normalize_text_with_mapping(speech["text"])
-    normalized_mapping, normalized_tokens = get_normalized_tokens(mapping)
-    mappings.append(
-        {
-            "original_text": original_text,
-            "mapping": mapping,
-            "normalized_mapping": normalized_mapping,
-            "normalized_tokens": normalized_tokens,
-        }
-    )
-
-alignments = []
-alignment_scores = []
-for mapping in mappings:
-    align_probs = np.load(os.path.join(args.probs_dir, speech["probs_file"]), allow_pickle=True)
-    # align_probs have dim (batches, nr_logits, vocab_size),
-    # We want to stack to (1, batch_size * nr_logits, vocab_size) for the model, keeping the batch dimension
-    align_probs = np.vstack(align_probs)
-    align_probs = torch.tensor(align_probs, device=device).unsqueeze(0)
-    tokens, scores = align_pytorch(mapping["normalized_tokens"], align_probs, device)
-    alignments.append(tokens)
-    alignment_scores.append(scores)
-
-
-def align(vad_dict):
-    alignments = []
-    for speech in vad_dict["speeches"]:
-        transcript_tokenized = sent_tokenize(speech["text"], language="swedish")
-        normalized_transcript = [normalize_text(t).upper() for t in transcript_tokenized]
-
-        # Certain sentences/tokens are empty after normalization, remove them
-        # from both the normalized transcript and the tokenized transcript.
-        for i in range(len(normalized_transcript) - 1, -1, -1):
-            if len(normalized_transcript[i]) == 0:
-                normalized_transcript.pop(i)
-                transcript_tokenized.pop(i)
-
-        probs = np.load(os.path.join(args.probs_dir, speech["probs_file"]), allow_pickle=True)
-
-        try:
-            alignment = align_with_transcript(
-                transcripts=normalized_transcript,
-                probs=probs,
-                audio_frames=speech["audio_frames"],
-                processor=processor,
-                samplerate=16000,
-                chunk_size=30,
-            )
-        except Exception as e:
-            logger.error(f"Failed to align {speech['probs_file']}: {e}")
-            logger.info(
-                f"Inserting empty alignment for {speech['probs_file']} in {vad_dict['metadata']['audio_file']}"
-            )
-            alignment = [
-                {"start_segment": None, "end_segment": None, "text": ""}
-                for _ in transcript_tokenized
-            ]
-
-        for i, segment in enumerate(alignment):
-            segment["start"] += float(speech["start_segment"])
-            segment["end"] += float(speech["start_segment"])
-            segment["text"] = transcript_tokenized[i]
-
-        speech["alignment"] = alignment
-        alignments.append(alignment)
-
+    os.makedirs(args.output_dir, exist_ok=True)
     json_path = os.path.join(
-        "data/speeches_by_audiofile",
-        os.path.splitext(vad_dict["metadata"]["audio_file"])[0] + ".json",
+        args.output_dir,
+        os.path.splitext(json_dict["metadata"]["audio_file"])[0] + ".json",
     )
 
-    with open(json_path, "w") as f:
-        json.dump(vad_dict, f, ensure_ascii=False, indent=4)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(json_dict, f, ensure_ascii=False, indent=4)
+
+    logger.info(f"Saved aligned json file to {json_path}")
 
 
-with mp.Pool(18) as pool:
-    alignments = pool.map(align, tqdm(vad_dicts, total=len(vad_dicts)), chunksize=1)
+if __name__ == "__main__":
+    model = AutoModelForCTC.from_pretrained(
+        "KBLab/wav2vec2-large-voxrex-swedish", torch_dtype=torch.float16
+    ).to(args.device)
+    processor = Wav2Vec2Processor.from_pretrained(
+        "KBLab/wav2vec2-large-voxrex-swedish", sample_rate=16000, return_tensors="pt"
+    )
+
+    json_files = glob.glob(args.input_dir + "/*")
+    aligned_files = glob.glob(args.probs_dir + "/*")
+    aligned_files = [os.path.basename(f) + ".json" for f in aligned_files]
+    json_files = [f for f in json_files if os.path.basename(f) in aligned_files]
+
+    # Split audio files to N parts if using N GPUs and select the part to process
+    json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
+    json_dicts = read_json_parallel(json_files, num_workers=10)
+
+    tokenizer = load("tokenizers/punkt/swedish.pickle")
+    # Add some abbreviations to the tokenizer
+    tokenizer._params.abbrev_types.update(
+        set(["d.v.s", "dvs", "fr.o.m", "kungl", "m.m", "milj", "o.s.v", "t.o.m", "milj.kr"])
+    )
+
+    if args.device == "cpu":
+        torch.set_num_threads(1)  # Avoid oversubscription
+        with mp.Pool(16) as pool:
+            pool.map(align_and_save, tqdm(json_dicts, total=len(json_dicts)), chunksize=1)
+    else:
+        torch.set_num_threads(1)
+        for json_dict in tqdm(json_dicts, total=len(json_dicts)):
+            align_and_save(json_dict)

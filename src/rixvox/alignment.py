@@ -1,107 +1,37 @@
 import itertools
+import os
 
-import ctc_segmentation
 import numpy as np
 import torch
-from transformers import Wav2Vec2Processor
+import torchaudio.functional as F
+from nltk.tokenize.punkt import PunktSentenceTokenizer
+from transformers.models.wav2vec2.processing_wav2vec2 import Wav2Vec2Processor
 
-# load dummy dataset and read soundfiles
-SAMPLERATE = 16000
+from rixvox.text import get_normalized_tokens, normalize_text_with_mapping
 
 
-def align_with_transcript(
-    transcripts: list[str],
-    probs: np.ndarray,
-    audio_frames: int,
-    processor: Wav2Vec2Processor,
-    samplerate: int = 16000,
-    chunk_size: int = 30,
-):
+def align_pytorch(transcripts, emissions, processor, device):
+    transcript = " ".join(transcripts)
+    transcript = transcript.replace("\n", " ").upper()
+    targets = processor.tokenizer(transcript, return_tensors="pt")["input_ids"]
+    targets = targets.to(device)
+
+    alignments, scores = F.forced_align(emissions, targets, blank=0)
+
+    alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
+    # scores = scores.exp()  # convert back to probability
+    return alignments, scores
+
+
+def format_timestamp(timestamp):
     """
-    Get alignment timestamps for each each word/sentence in a "ground truth" transcript.
-
-    Adapted from Wav2vec2 example code: https://github.com/lumaku/ctc-segmentation?tab=readme-ov-file#usage
-
-    Args:
-        transcripts: transcript organized as a list of words or sentences
-            (or other tokenization unit) to align.
-        probs: model output probabilities for the relevant segment of audio.
-            Shape: (batch_size, seq_len, vocab_size) or (seq_len, vocab_size).
-        audio_frames: number of audio frames in the segment of audio.
-        processor: Wav2Vec2Processor object containing the tokenizer.
-        samplerate: sample rate of the audio.
+    Convert timestamp in seconds to "hh:mm:ss:ms" format.
     """
-    # Tokenize transcripts
-    vocab = processor.tokenizer.get_vocab()
-    char_list = list(vocab.keys())
-    unk_id = vocab["<unk>"]
-
-    tokens = []
-    for transcript in transcripts:
-        assert len(transcript) > 0
-        tok_ids = processor.tokenizer(transcript.replace("\n", " ").upper())["input_ids"]
-        tok_ids = np.array(tok_ids, dtype="int")
-        tokens.append(tok_ids[tok_ids != unk_id])
-
-    probs = np.concatenate(probs, axis=0) if probs.ndim == 3 else probs
-    # Get nr of logits in the encoder (without padding added).
-    # I.e. the number of "tokens" the audio was encoded into, or the number of
-    # "character" predictions the model will output.
-    nr_ctc_logits = calculate_w2v_output_length(audio_frames, chunk_size=chunk_size)
-
-    # Align
-    config = ctc_segmentation.CtcSegmentationParameters(char_list=char_list)
-    config.index_duration = audio_frames / nr_ctc_logits / samplerate
-    ground_truth_mat, utt_begin_indices = ctc_segmentation.prepare_token_list(config, tokens)
-    timings, char_probs, state_list = ctc_segmentation.ctc_segmentation(
-        config, probs, ground_truth_mat
-    )
-    segments = ctc_segmentation.determine_utterance_segments(
-        config, utt_begin_indices, char_probs, timings, transcripts
-    )
-    return [
-        {"text": t, "start": p[0], "end": p[1], "conf": p[2]}
-        for t, p in zip(transcripts, segments)
-    ]
-
-
-def get_word_timestamps(
-    pred_transcript: str,
-    probs: torch.Tensor,
-    audio_frames: int,
-    processor: Wav2Vec2Processor,
-    samplerate: int = SAMPLERATE,
-    chunk_size: int = 30,
-) -> list[dict]:
-    """
-    Get timestamps for each word in the wav2vec2 model's prediction.
-
-    Adapted from Wav2vec2 example code: https://github.com/lumaku/ctc-segmentation?tab=readme-ov-file#usage
-    """
-    # Split the transcription into words
-    pred_transcript = pred_transcript.upper()  # vocab is upper case
-    words = pred_transcript.split(" ")
-
-    probs = probs[0].cpu().numpy() if probs.ndim == 3 else probs.cpu().numpy()
-    # Get nr of logits in the encoder (without padding added).
-    # I.e. the number of "tokens" the audio was encoded into, or the number of
-    # "character" predictions the model will output.
-    nr_ctc_logits = calculate_w2v_output_length(audio_frames, chunk_size=chunk_size)
-
-    # Align
-    vocab = processor.tokenizer.get_vocab()
-    char_list = list(vocab.keys())
-    config = ctc_segmentation.CtcSegmentationParameters(char_list=char_list)
-    config.index_duration = audio_frames / nr_ctc_logits / samplerate
-
-    ground_truth_mat, utt_begin_indices = ctc_segmentation.prepare_text(config, words)
-    timings, char_probs, state_list = ctc_segmentation.ctc_segmentation(
-        config, probs, ground_truth_mat
-    )
-    segments = ctc_segmentation.determine_utterance_segments(
-        config, utt_begin_indices, char_probs, timings, words
-    )
-    return [{"text": w, "start": p[0], "end": p[1], "conf": p[2]} for w, p in zip(words, segments)]
+    hours = int(timestamp // 3600)
+    minutes = int((timestamp % 3600) // 60)
+    seconds = int(timestamp % 60)
+    milliseconds = int((timestamp % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 
 def calculate_w2v_output_length(
@@ -188,6 +118,218 @@ def segment_speech_probs(probs_list: list[np.ndarray], speech_ids: list[str]):
     assert len(speech_chunk_counts) == len(probs_split) == len(set(unique_speech_ids))
     for speech_id, probs in zip(unique_speech_ids, probs_split):
         yield speech_id, probs
+
+
+def map_text_to_tokens(json_dict: dict) -> list[dict]:
+    """
+    Map text to normalized tokens, keeping track of character/token indices
+    in the original text.
+    """
+    speeches = json_dict["speeches"]
+    mappings = []
+    for i, speech in enumerate(speeches):
+        normalized_text, mapping, original_text = normalize_text_with_mapping(speech["text"])
+        normalized_mapping, normalized_tokens = get_normalized_tokens(mapping)
+        mappings.append(
+            {
+                "original_text": original_text,
+                "mapping": mapping,
+                "normalized_mapping": normalized_mapping,
+                "normalized_tokens": normalized_tokens,
+            }
+        )
+
+    return mappings
+
+
+def get_alignments_and_scores(
+    json_dict: dict,
+    mappings: list[dict],
+    processor: Wav2Vec2Processor,
+    probs_dir: str,
+    device: str,
+) -> tuple:
+    """
+    Get the alignments and scores for the tokens in the normalized text.
+    """
+    speeches = json_dict["speeches"]
+    alignments = []
+    alignment_scores = []
+    for i, mapping in enumerate(mappings):
+        align_probs = np.load(
+            os.path.join(probs_dir, speeches[i]["probs_file"]), allow_pickle=True
+        )
+        # align_probs have dim (batches, nr_logits, vocab_size),
+        # We want to stack to (1, batch_size * nr_logits, vocab_size)
+        align_probs = np.vstack(align_probs)
+        align_probs = torch.tensor(align_probs, device=device).unsqueeze(0)
+        tokens, scores = align_pytorch(
+            mapping["normalized_tokens"], align_probs, processor, device
+        )
+        alignments.append(tokens)
+        alignment_scores.append(scores)
+
+    return alignments, alignment_scores
+
+
+def add_timestamps_to_mapping(
+    json_dict: dict,
+    mappings: list[dict],
+    alignments: list[torch.Tensor],
+    alignment_scores: list[torch.Tensor],
+    chunk_size: int = 30,
+) -> list[dict]:
+    """
+    Add the timestamps from aligned tokens to the original text tokens via the mapping.
+    """
+    speeches = json_dict["speeches"]
+    for i, speech in enumerate(speeches):
+        token_spans = F.merge_tokens(alignments[i], alignment_scores[i], blank=0)
+        # Remove all TokenSpan with token=4 (token 4 is "|", used for space)
+        token_spans = [s for s in token_spans if s.token != 4]
+        word_spans = unflatten(
+            token_spans, [len(word) for word in mappings[i]["normalized_tokens"]]
+        )
+        ratio = speech["audio_frames"] / calculate_w2v_output_length(
+            speech["audio_frames"], chunk_size=chunk_size
+        )
+
+        for aligned_token, normalized_token in zip(
+            word_spans, mappings[i]["normalized_mapping"].items()
+        ):
+            original_index = normalized_token[1]["normalized_word_index"]
+            original_token = mappings[i]["mapping"][original_index]
+            start_time, end_time = get_word_timing(
+                aligned_token, ratio, start_segment=speech["start_segment"]
+            )
+
+            if not normalized_token[1]["is_multi_word"]:
+                normalized_token[1]["start_time"] = start_time
+                normalized_token[1]["end_time"] = end_time
+                original_token["start_time"] = start_time
+                original_token["end_time"] = end_time
+            else:
+                if normalized_token[1]["is_first_word"]:
+                    original_token["start_time"] = start_time
+                if normalized_token[1]["is_last_word"]:
+                    original_token["end_time"] = end_time
+
+                normalized_token[1]["start_time"] = start_time
+                normalized_token[1]["end_time"] = end_time
+
+    return mappings
+
+
+def get_sentence_alignment(
+    json_dict: dict, mappings: list[dict], tokenizer: PunktSentenceTokenizer
+):
+    """
+    Add the timestamps from aligned tokens to the sentenced tokenized original text.
+    """
+    speeches = json_dict["speeches"]
+    for i, speech in enumerate(speeches):
+        sentence_spans = tokenizer.span_tokenize(mappings[i]["original_text"])
+        word_mapping = mappings[i]["mapping"].copy()
+        sentence_mapping = []
+        previous_removed = []
+        for span in sentence_spans:
+            start_sentence_index = span[0]  # Character index in the original text
+            end_sentence_index = span[1]
+            while word_mapping:
+                word = word_mapping[0]
+
+                if start_sentence_index in list(
+                    range(word["original_start"], word["original_end"])
+                ):
+                    if word["start_time"] is None:
+                        index = 0
+                        start_sentence_time = None
+                        while start_sentence_time is None:
+                            try:
+                                start_sentence_time = word_mapping[index]["start_time"]
+                                index += 1
+                            except IndexError:
+                                break
+                    else:
+                        start_sentence_time = word["start_time"]
+
+                elif (end_sentence_index - 1) in list(
+                    range(word["original_start"], word["original_end"])
+                ):
+                    if word["end_time"] is None:
+                        index = -1
+                        end_sentence_time = None
+                        while end_sentence_time is None:
+                            # When end_time is None for a token, we search for a timestamp in
+                            # previous words that were removed from stack
+                            try:
+                                end_sentence_time = previous_removed[index]["end_time"]
+                                index -= 1
+                            except IndexError:
+                                break
+                    else:
+                        end_sentence_time = word["end_time"]
+
+                    sentence_mapping.append(
+                        {
+                            "start": start_sentence_time,
+                            "end": end_sentence_time,
+                            "start_hhmmssms": format_timestamp(start_sentence_time),
+                            "end_hhmmssms": format_timestamp(end_sentence_time),
+                            "text": mappings[i]["original_text"][
+                                start_sentence_index:end_sentence_index
+                            ],
+                        }
+                    )
+                    break
+
+                previous_removed.append(word_mapping.pop(0))
+
+            speech["alignment"] = sentence_mapping
+
+    return json_dict
+
+
+def unflatten(list_, lengths):
+    """
+    Unflatten a list of character output tokens from wav2vec2 into words.
+
+    Args:
+        list_:
+            A list of character tokens.
+        lengths:
+            A list of lengths of the words (normalized tokens).
+    """
+    assert len(list_) == sum(lengths)
+    i = 0
+    ret = []
+    for l in lengths:
+        ret.append(list_[i : i + l])
+        i += l
+    return ret
+
+
+def get_word_timing(word_span, ratio, start_segment=0, sample_rate=16000):
+    """
+    Calculate the start and end time of a word span in the original audio file.
+
+    Args:
+        word_span:
+            A list of TokenSpan objects representing the word span timings in the
+            aligned audio chunk.
+        ratio:
+            The number of audio frames per model output logit. This is the
+            total number of frames in our audio chunk divided by the number of
+            (non-padding) logit outputs for the chunk.
+        start_segment:
+            The start time of the speech segment in the original audio file.
+        sample_rate:
+            The sample rate of the audio file, default 16000.
+
+    """
+    start = (word_span[0].start * ratio) / sample_rate + start_segment
+    end = (word_span[-1].end * ratio) / sample_rate + start_segment
+    return start, end
 
 
 def get_word_timestamps_hf(word_offsets, time_offset):
