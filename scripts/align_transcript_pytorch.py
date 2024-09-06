@@ -20,31 +20,6 @@ from rixvox.alignment import (
 )
 from rixvox.dataset import read_json_parallel
 
-
-def align_pytorch(transcripts, emissions, device):
-    transcript = " ".join(transcripts)
-    transcript = transcript.replace("\n", " ").upper()
-    targets = processor.tokenizer(transcript, return_tensors="pt")["input_ids"]
-    targets = targets.to(device)
-
-    alignments, scores = F.forced_align(emissions, targets, blank=0)
-
-    alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
-    # scores = scores.exp()  # convert back to probability
-    return alignments, scores
-
-
-def format_timestamp(timestamp):
-    """
-    Convert timestamp in seconds to "hh:mm:ss:ms" format.
-    """
-    hours = int(timestamp // 3600)
-    minutes = int((timestamp % 3600) // 60)
-    seconds = int(timestamp % 60)
-    milliseconds = int((timestamp % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-
-
 os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
