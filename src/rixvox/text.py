@@ -66,6 +66,8 @@ def collect_regex_patterns(user_patterns=None):
                 "replacement": lambda m: f"{num2words(m.group(1) + m.group(2), lang='sv')}",
                 "transformation_type": "substitution",
             },
+            # Remove everyting within parentheses including the parentheses
+            {"pattern": r"\(.*?\)", "replacement": "", "transformation_type": "deletion"},
             # Replace : or / between digits with whitespace and num2words the digits
             {
                 "pattern": r"(\d+):(\d+)",

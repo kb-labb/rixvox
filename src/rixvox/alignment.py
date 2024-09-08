@@ -1,4 +1,5 @@
 import itertools
+import logging
 import os
 
 import numpy as np
@@ -8,6 +9,8 @@ from nltk.tokenize.punkt import PunktSentenceTokenizer
 from transformers.models.wav2vec2.processing_wav2vec2 import Wav2Vec2Processor
 
 from rixvox.text import get_normalized_tokens, normalize_text_with_mapping
+
+logger = logging.getLogger(__name__)
 
 
 def align_pytorch(transcripts, emissions, processor, device):
@@ -130,6 +133,7 @@ def map_text_to_tokens(json_dict: dict) -> list[dict]:
     for i, speech in enumerate(speeches):
         normalized_text, mapping, original_text = normalize_text_with_mapping(speech["text"])
         normalized_mapping, normalized_tokens = get_normalized_tokens(mapping)
+        speech["text_normalized"] = normalized_text
         mappings.append(
             {
                 "original_text": original_text,
@@ -139,7 +143,7 @@ def map_text_to_tokens(json_dict: dict) -> list[dict]:
             }
         )
 
-    return mappings
+    return mappings, json_dict
 
 
 def get_alignments_and_scores(
@@ -163,9 +167,17 @@ def get_alignments_and_scores(
         # We want to stack to (1, batch_size * nr_logits, vocab_size)
         align_probs = np.vstack(align_probs)
         align_probs = torch.tensor(align_probs, device=device).unsqueeze(0)
-        tokens, scores = align_pytorch(
-            mapping["normalized_tokens"], align_probs, processor, device
-        )
+
+        try:
+            tokens, scores = align_pytorch(
+                mapping["normalized_tokens"], align_probs, processor, device
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to align speech {speeches[i]['speech_id']} from file {json_dict['metadata']['audio_file']}: {e}"
+            )
+            tokens = []
+            scores = []
         alignments.append(tokens)
         alignment_scores.append(scores)
 
@@ -184,6 +196,9 @@ def add_timestamps_to_mapping(
     """
     speeches = json_dict["speeches"]
     for i, speech in enumerate(speeches):
+        if (len(alignments[i]) == 0) or (len(alignment_scores[i]) == 0):
+            continue
+
         token_spans = F.merge_tokens(alignments[i], alignment_scores[i], blank=0)
         # Remove all TokenSpan with token=4 (token 4 is "|", used for space)
         token_spans = [s for s in token_spans if s.token != 4]
@@ -230,11 +245,20 @@ def get_sentence_alignment(
     for i, speech in enumerate(speeches):
         sentence_spans = tokenizer.span_tokenize(mappings[i]["original_text"])
         word_mapping = mappings[i]["mapping"].copy()
+        if "start_time" not in word_mapping[0]:
+            logger.info(
+                f"Skipping {speech['speech_id']} in {json_dict['metadata']['audio_file']} because alignment is missing/failed."
+            )
+            speech["alignment"] = []
+            continue
+
         sentence_mapping = []
         previous_removed = []
         for span in sentence_spans:
             start_sentence_index = span[0]  # Character index in the original text
             end_sentence_index = span[1]
+            start_sentence_time = None
+            end_sentence_time = None
             while word_mapping:
                 word = word_mapping[0]
 
@@ -245,6 +269,8 @@ def get_sentence_alignment(
                         index = 0
                         start_sentence_time = None
                         while start_sentence_time is None:
+                            # When start_time is None for a token, we search for a timestamp in
+                            # following words that are still in stack
                             try:
                                 start_sentence_time = word_mapping[index]["start_time"]
                                 index += 1
@@ -269,6 +295,18 @@ def get_sentence_alignment(
                                 break
                     else:
                         end_sentence_time = word["end_time"]
+
+                    if start_sentence_time is None or end_sentence_time is None:
+                        # Skip sentence if we can't find start or end time
+                        logger.info(
+                            (
+                                f"start_sentence_time missing for {speech['speech_id']} in "
+                                f"{json_dict['metadata']['audio_file']} for sentence: "
+                                f"{mappings[i]['original_text'][start_sentence_index:end_sentence_index]}"
+                                f"and word: {word}"
+                            )
+                        )
+                        break
 
                     sentence_mapping.append(
                         {

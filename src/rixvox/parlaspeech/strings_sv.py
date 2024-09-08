@@ -4,10 +4,11 @@
 ocr_corrections = {
     "\$": "§",
     "bl\. a\.": "bl.a.",
-    "bl\.a(?= )": "bl.a.",
+    "bl\. ?a(?= )": "bl.a.",
     "[D|d]\.v\.s ": "d.v.s. ",
     "[D|d]\. v\.s.": "d.v.s.",
-    "[F|f]r\.o\.m ": "fr.o.m.",
+    "[F|f]r\. ?o\. ?m ": "fr.o.m.",
+    "[F|f]r\. ?o\. ?m\.?": "fr.o.m.",
     "[K|k]ungl\. maj\: t": "kungl. maj:t",
     "m\. m\.": "m.m.",
     "m\.m ": "m.m. ",

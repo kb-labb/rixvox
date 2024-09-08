@@ -23,7 +23,7 @@ from rixvox.dataset import read_json_parallel
 os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
-    filename="logs/transcribe_w2v.log",
+    filename="logs/align_transcript.log",
     level=logging.INFO,
     datefmt="%Y-%m-%d %H:%M:%S",
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
@@ -83,22 +83,19 @@ args = argparser.parse_args()
 
 
 def align_and_save(json_dict):
-    try:  # Align the speech
-        logger.info(f"Aligning {json_dict['metadata']['audio_file']}")
-        mappings = map_text_to_tokens(json_dict)
-        alignments, alignment_scores = get_alignments_and_scores(
-            json_dict=json_dict,
-            mappings=mappings,
-            processor=processor,
-            probs_dir=args.probs_dir,
-            device=args.device,
-        )
-        mappings = add_timestamps_to_mapping(
-            json_dict, mappings, alignments, alignment_scores, chunk_size=args.chunk_size
-        )
-        json_dict = get_sentence_alignment(json_dict, mappings, tokenizer)
-    except Exception as e:
-        logger.error(f"Failed to align a speech in {json_dict['metadata']['audio_file']}: {e}")
+    logger.info(f"Aligning {json_dict['metadata']['audio_file']}")
+    mappings, json_dict = map_text_to_tokens(json_dict)
+    alignments, alignment_scores = get_alignments_and_scores(
+        json_dict=json_dict,
+        mappings=mappings,
+        processor=processor,
+        probs_dir=args.probs_dir,
+        device=args.device,
+    )
+    mappings = add_timestamps_to_mapping(
+        json_dict, mappings, alignments, alignment_scores, chunk_size=args.chunk_size
+    )
+    json_dict = get_sentence_alignment(json_dict, mappings, tokenizer)
 
     os.makedirs(args.output_dir, exist_ok=True)
     json_path = os.path.join(

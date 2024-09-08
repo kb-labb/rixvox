@@ -20,7 +20,7 @@ from rixvox.dataset import (
 os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
-    filename="logs/transcribe_w2v.log",
+    filename="logs/align_probs.log",
     level=logging.INFO,
     datefmt="%Y-%m-%d %H:%M:%S",
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
