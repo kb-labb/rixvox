@@ -112,66 +112,72 @@ dataloader_datasets = torch.utils.data.DataLoader(
 )
 
 for dataset_info in tqdm(dataloader_datasets):
-    if dataset_info is None:
-        # If audio file is corrupted and non-readable.
-        # Audio file names logged in logs/error_audio_files.txt
+    try:
+        if dataset_info is None:
+            # If audio file is corrupted and non-readable.
+            # Audio file names logged in logs/error_audio_files.txt
+            continue
+
+        if dataset_info[0]["is_transcribed_same_model"]:
+            logger.info(f"Already transcribed: {dataset_info[0]['json_path']}.")
+            continue  # Skip already transcribed videos
+
+        logger.info(f"Transcribing: {dataset_info[0]['json_path']} on device {device}.")
+
+        dataset = dataset_info[0]["dataset"]
+        dataloader_mel = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=16,
+            num_workers=4,
+            pin_memory=True,
+            pin_memory_device=f"cuda:{args.gpu_id}",
+            shuffle=False,
+        )
+
+        transcription_texts = []
+
+        for batch in dataloader_mel:
+            batch = batch.to(device).half()
+            predicted_ids = model.generate(
+                batch,
+                return_dict_in_generate=True,
+                task="transcribe",
+                language="sv",
+                output_scores=True,
+                max_length=args.max_length,
+            )
+            transcription = audio_dataset.processor.batch_decode(
+                predicted_ids["sequences"], skip_special_tokens=True
+            )
+
+            transcription_chunk = make_transcription_chunks(transcription, args.model_name)
+            transcription_texts.extend(transcription_chunk)
+
+        # Add transcription to the json file
+        sub_dict = dataset.sub_dict
+        assert len(sub_dict["chunks"]) == len(transcription_texts)
+
+        for i, chunk in enumerate(sub_dict["chunks"]):
+            if args.overwrite_all or "transcription" not in chunk:
+                chunk["transcription"] = [transcription_texts[i]]
+            elif "transcription" in chunk:
+                if args.overwrite_model:
+                    for j, transcription in enumerate(chunk["transcription"]):
+                        if transcription["model"] == args.model_name:
+                            chunk["transcription"][j] = transcription_texts[i]
+                else:
+                    models = [transcription["model"] for transcription in chunk["transcription"]]
+                    # Check if transcription already exists for the model
+                    if args.model_name not in models:
+                        chunk["transcription"].append(transcription_texts[i])
+
+        # Save the json file encode as utf-8
+        os.makedirs(args.output_dir, exist_ok=True)
+        json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
+        with open(json_path, mode="w", encoding="utf-8") as f:
+            json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
+
+        logger.info(f"Transcription finished: {json_path} on {device}.")
+    except Exception as e:
+        logger.info(f"Transcription failed: {json_path}. Exception was {e}")
         continue
-
-    if dataset_info[0]["is_transcribed_same_model"]:
-        logger.info(f"Already transcribed: {dataset_info[0]['json_path']}.")
-        continue  # Skip already transcribed videos
-
-    dataset = dataset_info[0]["dataset"]
-    dataloader_mel = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=16,
-        num_workers=4,
-        pin_memory=True,
-        pin_memory_device=f"cuda:{args.gpu_id}",
-        shuffle=False,
-    )
-
-    transcription_texts = []
-
-    for batch in dataloader_mel:
-        batch = batch.to(device).half()
-        predicted_ids = model.generate(
-            batch,
-            return_dict_in_generate=True,
-            task="transcribe",
-            language="sv",
-            output_scores=True,
-            max_length=args.max_length,
-        )
-        transcription = audio_dataset.processor.batch_decode(
-            predicted_ids["sequences"], skip_special_tokens=True
-        )
-
-        transcription_chunk = make_transcription_chunks(transcription, args.model_name)
-        transcription_texts.extend(transcription_chunk)
-
-    # Add transcription to the json file
-    sub_dict = dataset.sub_dict
-    assert len(sub_dict["chunks"]) == len(transcription_texts)
-
-    for i, chunk in enumerate(sub_dict["chunks"]):
-        if args.overwrite_all or "transcription" not in chunk:
-            chunk["transcription"] = [transcription_texts[i]]
-        elif "transcription" in chunk:
-            if args.overwrite_model:
-                for j, transcription in enumerate(chunk["transcription"]):
-                    if transcription["model"] == args.model_name:
-                        chunk["transcription"][j] = transcription_texts[i]
-            else:
-                models = [transcription["model"] for transcription in chunk["transcription"]]
-                # Check if transcription already exists for the model
-                if args.model_name not in models:
-                    chunk["transcription"].append(transcription_texts[i])
-
-    # Save the json file encode as utf-8
-    os.makedirs(args.output_dir, exist_ok=True)
-    json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
-    with open(json_path, mode="w", encoding="utf-8") as f:
-        json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
-
-    logger.info(f"Transcription finished: {json_path}.")

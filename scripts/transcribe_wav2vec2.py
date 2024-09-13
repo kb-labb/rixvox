@@ -113,77 +113,81 @@ dataloader_datasets = torch.utils.data.DataLoader(
     audio_dataset,
     batch_size=1,
     collate_fn=custom_collate_fn,
-    num_workers=5,
+    num_workers=3,
     shuffle=False,
 )
 
 TIME_OFFSET = model.config.inputs_to_logits_ratio / processor.feature_extractor.sampling_rate
 
 for dataset_info in tqdm(dataloader_datasets):
-    if dataset_info is None:
+    try:
+        if dataset_info is None:
+            continue
+
+        logging.info(f"Transcribing: {dataset_info[0]['json_path']} on {device}.")
+
+        if dataset_info[0]["is_transcribed_same_model"]:
+            logger.info(f"Already transcribed: {dataset_info[0]['json_path']}.")
+            continue  # Skip already transcribed videos
+
+        dataset = dataset_info[0]["dataset"]
+        dataloader_mel = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=16,
+            num_workers=4,
+            collate_fn=wav2vec_collate_fn,
+            pin_memory=True,
+            pin_memory_device=f"cuda:{args.gpu_id}",
+            shuffle=False,
+        )
+
+        transcription_texts = []
+
+        for batch in dataloader_mel:
+            batch = batch.to(device).half()
+            with torch.inference_mode():
+                logits = model(batch).logits
+
+            probs = torch.nn.functional.softmax(logits, dim=-1)  # Need for CTC segmentation
+            predicted_ids = torch.argmax(logits, dim=-1)
+            transcription = audio_dataset.processor.batch_decode(
+                predicted_ids, output_word_offsets=True
+            )
+
+            word_timestamps = get_word_timestamps_hf(
+                transcription["word_offsets"], time_offset=TIME_OFFSET
+            )
+
+            transcription_chunk = make_transcription_chunks_w2v(
+                transcription["text"], word_timestamps=word_timestamps, model_name=args.model_name
+            )
+            transcription_texts.extend(transcription_chunk)
+
+        # Add transcription to the json file
+        sub_dict = dataset.sub_dict
+        assert len(sub_dict["chunks"]) == len(transcription_texts)
+
+        for i, chunk in enumerate(sub_dict["chunks"]):
+            if args.overwrite_all or "transcription" not in chunk:
+                chunk["transcription"] = [transcription_texts[i]]
+            elif "transcription" in chunk:
+                if args.overwrite_model:
+                    for j, transcription in enumerate(chunk["transcription"]):
+                        if transcription["model"] == args.model_name:
+                            chunk["transcription"][j] = transcription_texts[i]
+                else:
+                    models = [transcription["model"] for transcription in chunk["transcription"]]
+                    # Check if transcription already exists for the model
+                    if args.model_name not in models:
+                        chunk["transcription"].append(transcription_texts[i])
+
+        # Save the json file encode as utf-8
+        os.makedirs(args.output_dir, exist_ok=True)
+        json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
+        with open(json_path, mode="w", encoding="utf-8") as f:
+            json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
+
+        logger.info(f"Transcription finished: {json_path} on {device}.")
+    except Exception as e:
+        logger.info(f"Transcription failed: {json_path}. Exception was {e}")
         continue
-
-    logging.info(f"Transcribing: {dataset_info[0]['json_path']}.")
-
-    if dataset_info[0]["is_transcribed_same_model"]:
-        logger.info(f"Already transcribed: {dataset_info[0]['json_path']}.")
-        continue  # Skip already transcribed videos
-
-    dataset = dataset_info[0]["dataset"]
-    dataloader_mel = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=16,
-        num_workers=4,
-        collate_fn=wav2vec_collate_fn,
-        pin_memory=True,
-        pin_memory_device=f"cuda:{args.gpu_id}",
-        shuffle=False,
-    )
-
-    transcription_texts = []
-
-    for batch in dataloader_mel:
-        batch = batch.to(device).half()
-        with torch.inference_mode():
-            logits = model(batch).logits
-
-        probs = torch.nn.functional.softmax(logits, dim=-1)  # Need for CTC segmentation
-        predicted_ids = torch.argmax(logits, dim=-1)
-        transcription = audio_dataset.processor.batch_decode(
-            predicted_ids, output_word_offsets=True
-        )
-
-        word_timestamps = get_word_timestamps_hf(
-            transcription["word_offsets"], time_offset=TIME_OFFSET
-        )
-
-        transcription_chunk = make_transcription_chunks_w2v(
-            transcription["text"], word_timestamps=word_timestamps, model_name=args.model_name
-        )
-        transcription_texts.extend(transcription_chunk)
-
-    # Add transcription to the json file
-    sub_dict = dataset.sub_dict
-    assert len(sub_dict["chunks"]) == len(transcription_texts)
-
-    for i, chunk in enumerate(sub_dict["chunks"]):
-        if args.overwrite_all or "transcription" not in chunk:
-            chunk["transcription"] = [transcription_texts[i]]
-        elif "transcription" in chunk:
-            if args.overwrite_model:
-                for j, transcription in enumerate(chunk["transcription"]):
-                    if transcription["model"] == args.model_name:
-                        chunk["transcription"][j] = transcription_texts[i]
-            else:
-                models = [transcription["model"] for transcription in chunk["transcription"]]
-                # Check if transcription already exists for the model
-                if args.model_name not in models:
-                    chunk["transcription"].append(transcription_texts[i])
-
-    # Save the json file encode as utf-8
-    os.makedirs(args.output_dir, exist_ok=True)
-    json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
-    with open(json_path, mode="w", encoding="utf-8") as f:
-        json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
-
-    logger.info(f"Transcription finished: {json_path}.")
