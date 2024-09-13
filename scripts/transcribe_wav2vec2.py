@@ -1,9 +1,10 @@
 import argparse
 import glob
-import json
 import logging
 import os
 
+import numpy as np
+import simplejson as json
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCTC, Wav2Vec2Processor
@@ -13,6 +14,7 @@ from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
+    read_json_parallel,
     wav2vec_collate_fn,
 )
 
@@ -28,7 +30,18 @@ logger = logging.getLogger(__name__)
 argparser = argparse.ArgumentParser()
 argparser.add_argument("--model_name", type=str, default="KBLab/wav2vec2-large-voxrex-swedish")
 argparser.add_argument("--gpu_id", type=int, default=0)
-argparser.add_argument("--max_length", type=int, default=185)
+argparser.add_argument(
+    "--num_shards",
+    type=int,
+    default=1,
+    help="Number of splits to make for the data. Set to the number of GPUs used.",
+)
+argparser.add_argument(
+    "--data_shard",
+    type=int,
+    default=0,
+    help="Which split of the data to process. 0 to num_shards-1.",
+)
 argparser.add_argument(
     "--overwrite_all", action="store_true", help="Overwrite all existing transcriptions."
 )
@@ -37,13 +50,23 @@ argparser.add_argument(
     action="store_true",
     help="Overwrite existing transcriptions for the model.",
 )
+argparser.add_argument("--json_dir", type=str, default="data/vad_output")
+argparser.add_argument("--output_dir", type=str, default="data/vad_output")
+argparser.add_argument(
+    "--audio_dir",
+    type=str,
+    default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_old/all",
+)
 
 args = argparser.parse_args()
+
+args.json_dir = "data/speeches_by_audiofile_aligned"
+args.output_dir = "data/speeches_by_audiofile_transcribed"
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 # read vad json
-json_files = glob.glob("data/vad_output/*.json")
+json_files = glob.glob(f"{args.json_dir}/*.json")
 
 audio_files = []
 vad_dicts = []
@@ -56,14 +79,32 @@ for json_file in tqdm(json_files):
             # Skip empty or only static audio files
             empty_json_files.append(json_file)
             continue
-        audio_files.append(vad_dict["metadata"]["audio_path"])
+
+        if "audio_path" in vad_dict["metadata"]:
+            audio_files.append(vad_dict["metadata"]["audio_path"])
+        elif "audio_file" in vad_dict["metadata"]:
+            audio_files.append(vad_dict["metadata"]["audio_file"])
         vad_dicts.append(vad_dict)
 
 json_files = [json_file for json_file in json_files if json_file not in empty_json_files]
+# Split the data into num_shards and select the data_shard
+json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
+
 
 model = AutoModelForCTC.from_pretrained(args.model_name, torch_dtype=torch.float16).to(device)
+model.eval()
+
+
+def my_filter(x):
+    return True
+
+
 audio_dataset = AudioFileChunkerDataset(
-    audio_paths=audio_files, json_paths=json_files, model_name=args.model_name
+    audio_paths=audio_files,
+    json_paths=json_files,
+    model_name=args.model_name,
+    audio_dir=args.audio_dir,
+    my_filter=my_filter,
 )
 
 processor = Wav2Vec2Processor.from_pretrained(
@@ -141,8 +182,10 @@ for dataset_info in tqdm(dataloader_datasets):
                 if args.model_name not in models:
                     chunk["transcription"].append(transcription_texts[i])
 
-    # Save the json file
-    with open(dataset_info[0]["json_path"], "w") as f:
-        json.dump(sub_dict, f, ensure_ascii=False, indent=4)
+    # Save the json file encode as utf-8
+    os.makedirs(args.output_dir, exist_ok=True)
+    json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
+    with open(json_path, mode="w", encoding="utf-8") as f:
+        json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
 
-    logger.info(f"Transcription finished: {dataset_info[0]['json_path']}.")
+    logger.info(f"Transcription finished: {json_path}.")

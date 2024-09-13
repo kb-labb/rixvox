@@ -1,4 +1,5 @@
 import json
+import logging
 import multiprocessing as mp
 import os
 import subprocess
@@ -12,6 +13,8 @@ from tqdm import tqdm
 from transformers import Wav2Vec2Processor, WhisperProcessor
 
 from rixvox.audio import convert_audio_to_wav
+
+logger = logging.getLogger(__name__)
 
 
 class VADAudioDataset(Dataset):
@@ -71,6 +74,10 @@ class AudioFileChunkerDataset(Dataset):
         audio_paths (list): List of paths to audio files
         json_paths (list): List of paths to json files
         model_name (str): Model name to use for the processor
+        audio_dir (str): Directory with audio files. If None, audio_paths
+            should be full paths. Otherwise, audio_paths should be filenames
+            or paths relative to audio_dir.
+        my_filter (function): Function to filter out unwanted chunks
 
     Returns:
         out_dict (dict): Dictionary with the following keys:
@@ -82,7 +89,16 @@ class AudioFileChunkerDataset(Dataset):
             "is_langdetected": Whether the audio has been language detected
     """
 
-    def __init__(self, audio_paths, json_paths, model_name="openai/whisper-large-v2"):
+    def __init__(
+        self,
+        audio_paths,
+        json_paths,
+        model_name="openai/whisper-large-v2",
+        audio_dir=None,
+        my_filter=None,
+    ):
+        if audio_dir is not None:
+            audio_paths = [os.path.join(audio_dir, file) for file in audio_paths]
         self.audio_paths = audio_paths
         self.json_paths = json_paths
         self.model_name = model_name
@@ -90,6 +106,11 @@ class AudioFileChunkerDataset(Dataset):
             self.processor = WhisperProcessor.from_pretrained(model_name)
         elif "wav2vec2" in model_name:
             self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+
+        if my_filter is None:
+            self.my_filter = lambda x: True
+        else:
+            self.my_filter = my_filter
 
     def __len__(self):
         return len(self.audio_paths)
@@ -133,7 +154,7 @@ class AudioFileChunkerDataset(Dataset):
         return audio, sr
 
     def json_chunks(self, sub_dict):
-        for chunk in sub_dict["chunks"]:
+        for chunk in filter(lambda x: self.my_filter(x), sub_dict["chunks"]):
             yield chunk["start"], chunk["end"]
 
     def audio_chunker(self, audio_path, sub_dict, sr=16000):
@@ -149,7 +170,26 @@ class AudioFileChunkerDataset(Dataset):
         json_path = self.json_paths[idx]
 
         with open(json_path) as f:
-            sub_dict = json.load(f)
+            out_dict = {
+                "dataset": None,
+                "metadata": None,
+                "audio_path": audio_path,
+                "json_path": json_path,
+                "is_transcribed": None,
+                "is_transcribed_same_model": None,
+                "is_langdetected": None,
+            }
+            try:
+                sub_dict = json.load(f)
+                if (len(list(filter(lambda x: self.my_filter(x), sub_dict["chunks"])))) == 0 or (
+                    n_non_silent_chunks(sub_dict) == 0
+                ):
+                    logger.info(f"Nothing do to for {json_path}")
+                    out_dict["metadata"] = sub_dict["metadata"]
+                    return out_dict
+            except Exception as e:
+                logger.error(f"Error reading json file {json_path}. {e}")
+                return out_dict
 
         spectograms = []
         for audio_chunk in self.audio_chunker(audio_path, sub_dict):
@@ -273,6 +313,11 @@ class AlignmentChunkerDataset(AudioFileChunkerDataset):
         }
 
         return out_dict
+
+
+def n_non_silent_chunks(sub_dict) -> int:
+    non_silent_chunks = [x for x in sub_dict["chunks"] if x["text"] != ""]
+    return len(non_silent_chunks)
 
 
 def custom_collate_fn(batch: dict) -> list:

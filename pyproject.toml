@@ -9,7 +9,7 @@ name = "rixvox"
 requires-python = ">= 3.9"
 
 dependencies = [
-  "transformers>=4.38.0",
+  "transformers<=4.36.1",
   "datasets>=2.18.0",
   "torch>=2.1.2",
   "accelerate>=0.25.0",
