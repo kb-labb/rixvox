@@ -13,6 +13,7 @@ from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks,
+    read_json_parallel,
 )
 
 os.makedirs("logs", exist_ok=True)
@@ -56,28 +57,30 @@ argparser.add_argument(
     action="store_true",
     help="Overwrite existing transcriptions for the model.",
 )
+argparser.add_argument("--json_dir", type=str, default="data/vad_output")
+argparser.add_argument("--output_dir", type=str, default="data/vad_output")
+argparser.add_argument(
+    "--audio_dir",
+    type=str,
+    default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_old/all",
+)
 
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 # read vad json
-json_files = glob.glob("data/vad_output/*.json")
+logger.info("Reading json-file list")
+json_files = glob.glob(f"{args.json_dir}/*.json")
+# Split audio files to N parts if using N GPUs and select the part to process
+# Shuffle the list before splitting to avoid one GPU getting all long files
+np.random.shuffle(json_files, random=np.random.RandomState(1337))
+json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
+json_dicts = read_json_parallel(json_files, num_workers=10)
 
 audio_files = []
-vad_dicts = []
-empty_json_files = []
-for json_file in json_files:
-    with open(json_file) as f:
-        vad_dict = json.load(f)
-        if len(vad_dict["chunks"]) == 0:
-            # Skip empty or only static audio files
-            empty_json_files.append(json_file)
-            continue
-        audio_files.append(vad_dict["metadata"]["audio_path"])
-        vad_dicts.append(vad_dict)
-
-json_files = [json_file for json_file in json_files if json_file not in empty_json_files]
+for json_dict in json_dicts:
+    audio_files.append(json_dict["metadata"]["audio_file"])
 
 model = WhisperForConditionalGeneration.from_pretrained(
     args.model_name,
@@ -86,9 +89,17 @@ model = WhisperForConditionalGeneration.from_pretrained(
     device_map=device,
 )
 
-audio_files = np.array_split(audio_files, args.num_shards)[args.data_shard]
+
+def my_filter(x):
+    return True
+
+
 audio_dataset = AudioFileChunkerDataset(
-    audio_paths=audio_files, json_paths=json_files, model_name=args.model_name
+    audio_paths=audio_files,
+    json_paths=json_files,
+    model_name=args.model_name,
+    audio_dir=args.audio_dir,
+    my_filter=my_filter,
 )
 
 # Create a torch dataloader
@@ -157,8 +168,10 @@ for dataset_info in tqdm(dataloader_datasets):
                 if args.model_name not in models:
                     chunk["transcription"].append(transcription_texts[i])
 
-    # Save the json file
-    with open(dataset_info[0]["json_path"], "w") as f:
-        json.dump(sub_dict, f, ensure_ascii=False, indent=4)
+    # Save the json file encode as utf-8
+    os.makedirs(args.output_dir, exist_ok=True)
+    json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
+    with open(json_path, mode="w", encoding="utf-8") as f:
+        json.dump(sub_dict, f, ensure_ascii=False, indent=2, ignore_nan=True)
 
-    logger.info(f"Transcription finished: {dataset_info[0]['json_path']}.")
+    logger.info(f"Transcription finished: {json_path}.")

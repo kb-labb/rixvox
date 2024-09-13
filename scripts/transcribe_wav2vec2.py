@@ -14,7 +14,6 @@ from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
-    read_json_parallel,
     wav2vec_collate_fn,
 )
 
@@ -60,9 +59,6 @@ argparser.add_argument(
 
 args = argparser.parse_args()
 
-args.json_dir = "data/speeches_by_audiofile_aligned"
-args.output_dir = "data/speeches_by_audiofile_transcribed"
-
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 # read vad json
@@ -87,8 +83,10 @@ for json_file in tqdm(json_files):
         vad_dicts.append(vad_dict)
 
 json_files = [json_file for json_file in json_files if json_file not in empty_json_files]
-# Split the data into num_shards and select the data_shard
 json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
+
+audio_files = [audio_file for audio_file in audio_files if audio_file not in empty_json_files]
+audio_files = np.array_split(audio_files, args.num_shards)[args.data_shard]
 
 
 model = AutoModelForCTC.from_pretrained(args.model_name, torch_dtype=torch.float16).to(device)
