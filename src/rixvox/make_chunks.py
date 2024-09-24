@@ -72,17 +72,9 @@ def make_chunks(
             sub_i *= -1
         sub["id"] = sub_i
         sub = sub.copy()
-        # add to chunk if total chunk length < 30s
-        if sub["duration"] + total_length > max_threshold:
-            if sub["text"] == SILENCE:
-                filler_silence = sub.copy()
-                filler_silence["duration"] = max_threshold - total_length
-                filler_silence["start"] = total_length
-                filler_silence["end"] = max_threshold
-                if surround_silence:
-                    chunk_end = sub["start"] + filler_silence["duration"]
-                    chunk.append(filler_silence)
-                    sub_ids.append(sub_i)
+
+        if sub["live"] or sub["duplicate"] or sub["is_long"]:
+            if total_length >= min_threshold:
                 chunks.append(
                     {
                         "start": chunk_start,
@@ -96,71 +88,101 @@ def make_chunks(
                         "speech_id": speech_id,
                     }
                 )
-                chunk = []
-                sub_ids = []
-                total_length = 0
-                sub["start"] = sub["start"] + filler_silence["duration"]
-                sub["duration"] -= filler_silence["duration"]
+            # else: we throw away the chunk
+            chunk = []
+            sub_ids = []
+            total_length = 0
+            continue
+        else:
+            # add to chunk if total chunk length < 30s
+            if sub["duration"] + total_length > max_threshold:
+                if sub["text"] == SILENCE:
+                    filler_silence = sub.copy()
+                    filler_silence["duration"] = max_threshold - total_length
+                    filler_silence["start"] = total_length
+                    filler_silence["end"] = max_threshold
+                    if surround_silence:
+                        chunk_end = sub["start"] + filler_silence["duration"]
+                        chunk.append(filler_silence)
+                        sub_ids.append(sub_i)
+                    chunks.append(
+                        {
+                            "start": chunk_start,
+                            "end": chunk_end,
+                            "duration": chunk_end - chunk_start,
+                            "subs": chunk,
+                            "text_whisper": subs_to_whisper(chunk),
+                            "text": subs_to_raw_text(chunk),
+                            "transcription": [],
+                            "sub_ids": sub_ids,
+                            "speech_id": speech_id,
+                        }
+                    )
+                    chunk = []
+                    sub_ids = []
+                    total_length = 0
+                    sub["start"] = sub["start"] + filler_silence["duration"]
+                    sub["duration"] -= filler_silence["duration"]
 
-                while sub["duration"] > max_threshold:
+                    while sub["duration"] > max_threshold:
+                        chunk_start = sub["start"]
+                        chunk_end = sub["start"] + max_threshold
+                        if silent_chunks:
+                            chunks.append(
+                                {
+                                    "start": chunk_start,
+                                    "end": chunk_end,
+                                    "duration": chunk_end - chunk_start,
+                                    "subs": [
+                                        {
+                                            "text": SILENCE,
+                                            "start": 0,
+                                            "end": max_threshold,
+                                            "duration": max_threshold,
+                                        }
+                                    ],
+                                    "text_whisper": subs_to_whisper(chunk),
+                                    "text": subs_to_raw_text(chunk),
+                                    "transcription": [],
+                                    "sub_ids": [sub["id"]],
+                                    "speech_id": speech_id,
+                                }
+                            )
+                        # chunk = []
+                        # total_length = 0
+                        sub["start"] += max_threshold
+                        sub["duration"] -= max_threshold
+                else:
+                    chunks.append(
+                        {
+                            "start": chunk_start,
+                            "end": chunk_end,
+                            "duration": chunk_end - chunk_start,
+                            "subs": chunk,
+                            "text_whisper": subs_to_whisper(chunk),
+                            "text": subs_to_raw_text(chunk),
+                            "transcription": [],
+                            "sub_ids": sub_ids,
+                            "speech_id": speech_id,
+                        }
+                    )
+                    chunk = []
+                    sub_ids = []
+                    total_length = 0
+
+            # we either do not care about having silence at the beginning
+            # or we are strict and start with a proper sub
+            if surround_silence or (
+                not surround_silence and len(chunk) == 0 and sub["text"] != SILENCE
+            ):
+                if len(chunk) == 0:
                     chunk_start = sub["start"]
-                    chunk_end = sub["start"] + max_threshold
-                    if silent_chunks:
-                        chunks.append(
-                            {
-                                "start": chunk_start,
-                                "end": chunk_end,
-                                "duration": chunk_end - chunk_start,
-                                "subs": [
-                                    {
-                                        "text": SILENCE,
-                                        "start": 0,
-                                        "end": max_threshold,
-                                        "duration": max_threshold,
-                                    }
-                                ],
-                                "text_whisper": subs_to_whisper(chunk),
-                                "text": subs_to_raw_text(chunk),
-                                "transcription": [],
-                                "sub_ids": [sub["id"]],
-                                "speech_id": speech_id,
-                            }
-                        )
-                    # chunk = []
-                    # total_length = 0
-                    sub["start"] += max_threshold
-                    sub["duration"] -= max_threshold
-            else:
-                chunks.append(
-                    {
-                        "start": chunk_start,
-                        "end": chunk_end,
-                        "duration": chunk_end - chunk_start,
-                        "subs": chunk,
-                        "text_whisper": subs_to_whisper(chunk),
-                        "text": subs_to_raw_text(chunk),
-                        "transcription": [],
-                        "sub_ids": sub_ids,
-                        "speech_id": speech_id,
-                    }
-                )
-                chunk = []
-                sub_ids = []
-                total_length = 0
-
-        # we either do not care about having silence at the beginning
-        # or we are strict and start with a proper sub
-        if surround_silence or (
-            not surround_silence and len(chunk) == 0 and sub["text"] != SILENCE
-        ):
-            if len(chunk) == 0:
-                chunk_start = sub["start"]
-            chunk_end = sub["end"]
-            sub["start"] = total_length
-            sub["end"] = total_length + sub["duration"]
-            chunk.append(sub)
-            sub_ids.append(sub_i)
-            total_length += sub["duration"]
+                chunk_end = sub["end"]
+                sub["start"] = total_length
+                sub["end"] = total_length + sub["duration"]
+                chunk.append(sub)
+                sub_ids.append(sub_i)
+                total_length += sub["duration"]
 
     if total_length >= min_threshold:
         chunks.append(

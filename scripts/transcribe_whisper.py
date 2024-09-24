@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -73,14 +74,18 @@ device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "c
 logger.info("Reading json-file list")
 json_files = glob.glob(f"{args.json_dir}/*.json")
 # Split audio files to N parts if using N GPUs and select the part to process
-# Shuffle the list before splitting to avoid one GPU getting all long files
-np.random.shuffle(json_files, random=np.random.RandomState(1337))
 json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
 json_dicts = read_json_parallel(json_files, num_workers=10)
 
 audio_files = []
 for json_dict in json_dicts:
-    audio_files.append(json_dict["metadata"]["audio_file"])
+    if "audio_file" in json_dict["metadata"]:
+        audio_files.append(json_dict["metadata"]["audio_file"])
+    elif "audio_path" in json_dict["metadata"]:
+        path = Path(json_dict["metadata"]["audio_path"])
+        # audio_files.append(os.path.join(path.parent.name, path.name))
+        audio_files.append(os.path.join(path.name))
+
 
 model = WhisperForConditionalGeneration.from_pretrained(
     args.model_name,
@@ -106,7 +111,7 @@ audio_dataset = AudioFileChunkerDataset(
 dataloader_datasets = torch.utils.data.DataLoader(
     audio_dataset,
     batch_size=1,
-    num_workers=3,
+    num_workers=2,
     collate_fn=custom_collate_fn,
     shuffle=False,
 )
@@ -179,5 +184,5 @@ for dataset_info in tqdm(dataloader_datasets):
 
         logger.info(f"Transcription finished: {json_path} on {device}.")
     except Exception as e:
-        logger.info(f"Transcription failed: {json_path}. Exception was {e}")
+        logger.error(f"Transcription failed: {json_path}. Exception was {e}")
         continue

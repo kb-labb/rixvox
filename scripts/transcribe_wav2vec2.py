@@ -54,7 +54,7 @@ argparser.add_argument("--output_dir", type=str, default="data/vad_output")
 argparser.add_argument(
     "--audio_dir",
     type=str,
-    default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_old/all",
+    default=None,
 )
 
 args = argparser.parse_args()
@@ -159,7 +159,10 @@ for dataset_info in tqdm(dataloader_datasets):
             )
 
             transcription_chunk = make_transcription_chunks_w2v(
-                transcription["text"], word_timestamps=word_timestamps, model_name=args.model_name
+                transcription["text"],
+                word_timestamps=word_timestamps,
+                model_name=args.model_name,
+                include_word_timestamps=True,
             )
             transcription_texts.extend(transcription_chunk)
 
@@ -189,5 +192,6 @@ for dataset_info in tqdm(dataloader_datasets):
 
         logger.info(f"Transcription finished: {json_path} on {device}.")
     except Exception as e:
-        logger.info(f"Transcription failed: {json_path}. Exception was {e}")
+        json_path = os.path.join(args.output_dir, os.path.basename(dataset_info[0]["json_path"]))
+        logger.error(f"Transcription failed: {json_path}. Exception was {e}")
         continue

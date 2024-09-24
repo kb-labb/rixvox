@@ -18,17 +18,44 @@ logger = logging.getLogger(__name__)
 
 
 class VADAudioDataset(Dataset):
-    def __init__(self, files, sr=16000, chunk_size=30):
-        self.files = files
+    """
+    Dataset for Voice Activity Detection (VAD) using Pyannote.
+
+    Args:
+        metadata (list): List of dicts containing audio_paths and metadata.
+            Keys: "audio_path", "metadata" (dict with metadata fields)
+        audio_dir (str): Directory with audio files (relative to audio_paths)
+        dataset_source (str): Source of the dataset (riksdagen_web, riksdagen_old).
+        sr (int): Sample rate
+        chunk_size (int): Chunk size in seconds to split audio into
+    """
+
+    def __init__(self, metadata, audio_dir, sr=16000, chunk_size=30):
+        self.audio_dir = audio_dir
+
+        if audio_dir is not None:
+            for meta in metadata:
+                meta["audio_path"] = os.path.join(audio_dir, meta["audio_file"])
+
+        self.metadata = metadata
         self.sr = sr
         self.chunk_size = chunk_size
 
     def __len__(self):
-        return len(self.files)
+        return len(self.metadata)
 
     def __getitem__(self, idx):
-        audio, sr = self.read_audio(self.files[idx])
-        return audio
+        audio_path = self.metadata[idx]["audio_path"]
+        audio, sr = self.read_audio(audio_path)
+
+        out_dict = {
+            "audio": audio,
+            "metadata": self.metadata[idx]["metadata"],
+            "audio_path": audio_path,
+            "audio_file": self.metadata[idx]["audio_file"],
+        }
+
+        return out_dict
 
     def read_audio(self, audio_path):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -37,10 +64,11 @@ class VADAudioDataset(Dataset):
                 audio, sr = sf.read(os.path.join(tmpdirname, "tmp.wav"))
             except Exception as e:
                 print(f"Error reading audio file {audio_path}. {e}")
+                logging.error(f"Error reading audio file {audio_path}. {e}")
                 os.makedirs("logs", exist_ok=True)
                 with open("logs/error_audio_files.txt", "a") as f:
                     f.write(f"{audio_path}\n")
-                return None
+                return None, None
         return audio, sr
 
 
@@ -316,6 +344,10 @@ class AlignmentChunkerDataset(AudioFileChunkerDataset):
 
 
 def n_non_silent_chunks(sub_dict) -> int:
+    chunks_contain_text = ["text" in chunk for chunk in sub_dict["chunks"]]
+    if not any(chunks_contain_text):
+        return len(sub_dict["chunks"])
+
     non_silent_chunks = [x for x in sub_dict["chunks"] if x["text"] != ""]
     return len(non_silent_chunks)
 
@@ -396,15 +428,22 @@ def make_transcription_chunks_w2v(
     transcriptions,
     word_timestamps,
     model_name,
+    include_word_timestamps=True,
 ):
     transcription_chunks = []
 
     for i, transcript in enumerate(transcriptions):
-        transcription_dict = {
-            "text": transcript,
-            "word_timestamps": word_timestamps[i],
-            "model": model_name,
-        }
+        if include_word_timestamps:
+            transcription_dict = {
+                "text": transcript,
+                "word_timestamps": word_timestamps[i],
+                "model": model_name,
+            }
+        else:
+            transcription_dict = {
+                "text": transcript,
+                "model": model_name,
+            }
         transcription_chunks.append(transcription_dict)
 
     return transcription_chunks

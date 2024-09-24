@@ -80,18 +80,21 @@ def add_silence(
                     "text": SILENCE,
                     "duplicate": False,
                     "live": False,
+                    "is_long": False,
                     "speech_id": speech_id,
                 }
             )
         end = seconds_to_ms(alignment["end"])
+        duration = seconds_to_ms(alignment["end"]) - seconds_to_ms(alignment["start"])
         speech_with_silence.append(
             {
                 "start": seconds_to_ms(alignment["start"]),
                 "end": seconds_to_ms(alignment["end"]),
-                "duration": seconds_to_ms(alignment["end"]) - seconds_to_ms(alignment["start"]),
+                "duration": duration,
                 "text": alignment["text"],
                 "duplicate": False,
                 "live": False,
+                "is_long": duration > 30_000,
                 "speech_id": speech_id,
             }
         )

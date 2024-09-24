@@ -6,8 +6,9 @@ from collections import OrderedDict
 import numpy as np
 import pandas as pd
 from num2words import num2words
+from tqdm import tqdm
 
-from rixvox.parlaspeech.strings_sv import abbreviations, ocr_corrections, symbols
+from rixvox.strings.strings_sv import abbreviations, ocr_corrections, symbols
 
 
 def format_symbols_abbreviations():
@@ -346,6 +347,79 @@ def expand_abbreviations(text):
     return text
 
 
+[
+    # Capture pattern groups of type '(digits) kap. (digits) §'. For example "4 kap. 7 §".
+    # Replace the numbers with ordinals: "fjärde kapitlet sjunde paragrafen"
+    {
+        "pattern": r"(\d+) kap\. (\d+) \§",
+        "replacement": lambda m: f"{num2words(int(m.group(1)),lang='sv',ordinal=True)} kapitlet {num2words(int(m.group(2)),lang='sv', ordinal=True)} paragrafen",
+        "transformation_type": "substitution",
+    },
+    {
+        "pattern": r"(\d+)[\. ](\d+)",
+        "replacement": lambda m: f"{num2words(m.group(1) + m.group(2), lang='sv')}",
+        "transformation_type": "substitution",
+    },
+    # Remove everyting within parentheses including the parentheses
+    {"pattern": r"\(.*?\)", "replacement": "", "transformation_type": "deletion"},
+    # Replace : or / between digits with whitespace and num2words the digits
+    {
+        "pattern": r"(\d+):(\d+)",
+        "replacement": lambda m: f"{num2words(int(m.group(1)), lang='sv')} {num2words(int(m.group(2)), lang='sv')}",
+        "transformation_type": "substitution",
+    },
+    # Replace - between digits with " till " and num2words the digits
+    {
+        "pattern": r"(\d+)-(\d+)",
+        "replacement": lambda m: f"{num2words(int(m.group(1)), lang='sv')} till {num2words(int(m.group(2)), lang='sv')}",
+        "transformation_type": "substitution",
+    },
+    # Replace , between digits with " komma " and num2words the digits
+    {
+        "pattern": r"(\d+),(\d+)",
+        "replacement": lambda m: f"{num2words(int(m.group(1)), lang='sv')} komma {num2words(int(m.group(2)), lang='sv')}",
+        "transformation_type": "substitution",
+    },
+    {
+        "pattern": r"(\d+)[\.\,\:\-\/](\d+)",
+        "replacement": lambda m: f"{m.group(1)} {m.group(2)}",
+        "transformation_type": "substitution",
+    },
+    # Replace § with 'paragrafen' if preceded by a number
+    {
+        "pattern": r"(?<=\d )§",
+        "replacement": r"paragrafen",
+        "transformation_type": "substitution",
+    },
+    # Replace § with 'paragraf' if succeeded by a number
+    {
+        "pattern": r"§(?= \d)",
+        "replacement": r"paragraf",
+        "transformation_type": "substitution",
+    },
+    # Remove punctuation between whitespace
+    {"pattern": r"\s[^\w\s]\s", "replacement": " ", "transformation_type": "substitution"},
+    # Remove punctuation
+    {"pattern": r"[^\w\s]", "replacement": "", "transformation_type": "deletion"},
+    # Remove multiple spaces (more than one) with a single space
+    {"pattern": r"\s{2,}", "replacement": " ", "transformation_type": "substitution"},
+    # Strip leading and trailing whitespace
+    {"pattern": r"^\s+|\s+$", "replacement": "", "transformation_type": "deletion"},
+    # Replace digits with words
+    {
+        "pattern": r"(\d+)",
+        "replacement": lambda m: num2words(int(m.group(1)), lang="sv"),
+        "transformation_type": "substitution",
+    },
+    # Tokenize the rest of the text into words
+    {
+        "pattern": r"\w+",
+        "replacement": lambda m: m.group(),
+        "transformation_type": "substitution",  # Not really a substitution, but we need to record the transformation
+    },
+]
+
+
 def normalize_text(text):
     """
     Normalize speech text transcript by removing punctuation, converting numbers to words,
@@ -368,17 +442,36 @@ def normalize_text(text):
         lambda m: f"{num2words(int(m.group(1)),lang='sv',ordinal=True)} kapitlet {num2words(int(m.group(2)),lang='sv', ordinal=True)} paragrafen",
         text,
     )
-    # Replace whitespace between numbers with no whitespace: 1 000 000 -> 1000000
-    text = re.sub(r"(\d+) (\d+)", r"\1\2", text)
+    # Replace whitespace or dots between numbers with no whitespace: 1 000 000 -> 1000000
+    text = re.sub(r"(\d+)[\. ](\d+)", r"\1\2", text)
+
+    # Replace : or between digits with whitespace and num2words the digits
+    text = re.sub(
+        r"(\d+):(\d+)",
+        lambda m: f"{num2words(int(m.group(1)), lang='sv')} {num2words(int(m.group(2)), lang='sv')}",
+        text,
+    )
+    # Replace - between digits with " till " and num2words the digits
+    text = re.sub(
+        r"(\d+)-(\d+)",
+        lambda m: f"{num2words(int(m.group(1)), lang='sv')} till {num2words(int(m.group(2)), lang='sv')}",
+        text,
+    )
+    # Replace , between digits with " komma " and num2words the digits
+    text = re.sub(
+        r"(\d+),(\d+)",
+        lambda m: f"{num2words(int(m.group(1)), lang='sv')} komma {num2words(int(m.group(2)), lang='sv')}",
+        text,
+    )
 
     # Replace punctuations with whitespace if there is a number before and after it
-    # 3,14 -> 3 14, 4-5 -> 4 5, 4:5 -> 4 5, 4/5 -> 4 5 (closer to the actually pronounced number)
-    text = re.sub(r"(\d+)[\.\,\:\-\/](\d+)", r"\1 \2", text)
+    # 4/5 -> 4 5 (closer to the actually pronounced number)
+    text = re.sub(r"(\d+)[\,\:\-\/](\d+)", r"\1 \2", text)
 
     # Replace § with 'paragrafen' if there is a number before it
-    text = re.sub(r"(\d+) §", r"\1 paragrafen", text)
+    text = re.sub(r"(?<=\d )§", "paragrafen", text)
     # Replace § with "paragraf" if there is a number after it
-    text = re.sub(r"§ (\d+)", r"paragraf \1", text)
+    text = re.sub(r"§(?= \d)", "paragraf", text)
     # Normalize unicode characters
     text = unicodedata.normalize("NFKC", text)
     text = text.translate(str.maketrans("", "", string.punctuation))  # Remove punctuation
@@ -386,7 +479,9 @@ def normalize_text(text):
     text = re.sub(r"[\W]+", " ", text)
     # remove \r and \n and multiple spaces
     text = re.sub(r"\s+", " ", text)
-    # # Convert numbers to words
+    # Strip leading and trailing whitespace
+    text = text.strip()
+    # # Convert remaining numbers to words
     text = re.sub(r"\d+", lambda m: num2words(int(m.group(0)), lang="sv"), text)
     # Strip leading and trailing whitespace
     text = text.strip()
@@ -480,6 +575,11 @@ def preprocess_audio_metadata(speech_metadata):
     Returns:
         pd.DataFrame: A pandas dataframe with the relevant metadata fields.
     """
+    # If speech_metadata is not list
+    if not isinstance(speech_metadata["dokumentstatus"]["debatt"]["anforande"], list):
+        speech_metadata["dokumentstatus"]["debatt"]["anforande"] = [
+            speech_metadata["dokumentstatus"]["debatt"]["anforande"]
+        ]
 
     df = pd.json_normalize(
         speech_metadata,
@@ -516,18 +616,18 @@ def preprocess_audio_metadata(speech_metadata):
     ]
 
     df = df.rename(columns={"startpos": "start", "anf_sekunder": "duration"})
-    df = preprocess_text(df, is_audio_metadata=True)
-
     return df
 
 
-def preprocess_text(df, textcol="anf_text", is_audio_metadata=False):
+def preprocess_text(df, headers, textcol="anf_text"):
     """
     Preprocess the text field on modern Swedish parliament speeches retrieved from the
     Riksdagen API.
 
     Args:
         df (pd.DataFrame): A pandas dataframe that contains text column with speeches.
+        headers (list): A list of headers to remove from the text column (margin headers
+            that are not part of the actual speech appear in the text).
         textcol (str): The name of the text column.
 
     Returns:
@@ -542,12 +642,11 @@ def preprocess_text(df, textcol="anf_text", is_audio_metadata=False):
 
     # Some extra headers that don't contain "STYLEREF", but are still in <p> tags.
     # We grab the headers from the header column and remove "<p>{header}</p>" from the text column.
-    # data/headers.csv is created in scripts/preprocess_speeches_metadata.py.
-    headers = pd.read_csv("data/headers.csv")["avsnittsrubrik"].tolist()
-
-    for header in headers:
-        remove_header_p = f"<p>{header}</p>"
-        df[textcol] = df[textcol].str.replace(remove_header_p, "", regex=False)
+    # headers are created in scripts/preprocess_speeches_metadata.py.
+    if headers is not None:
+        for header in tqdm(headers):
+            remove_header_p = f"<p>{header}</p>"
+            df[textcol] = df[textcol].str.replace(remove_header_p, "", regex=False)
 
     df[textcol] = df[textcol].str.replace(r"<.*?>", " ", regex=True)  # Remove HTML tags
     # Remove text within parentheses, e.g. (applåder)

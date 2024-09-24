@@ -1,14 +1,16 @@
 torch
 torchaudio
 torchvision # apparently pytorch_lightning needs this (pyannote dependency)
-transformers
+transformers==4.36.1
 accelerate
 datasets
 pyannote.audio
+mutagen
 nltk
 jiwer
 soundfile
 mutagen
+num2words
 simplejson
 whisperx
 pyriksdagen

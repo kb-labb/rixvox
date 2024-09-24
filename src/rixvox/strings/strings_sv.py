@@ -1,4 +1,4 @@
-# Normalize variations of abbreviations
+# Normalize variations of abbreviations, symbols, and OCR errors in Swedish text
 
 # These aren't escaped in code, so they need to be escaped here
 ocr_corrections = {
@@ -53,4 +53,5 @@ abbreviations = {
 
 symbols = {
     "%": "procent",
+    "½": "en halv",
 }
