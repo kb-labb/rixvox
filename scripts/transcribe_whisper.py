@@ -65,6 +65,13 @@ argparser.add_argument(
     type=str,
     default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_old/all",
 )
+argparser.add_argument(
+    "--skip_already_transcribed",
+    action="store_true",
+    help="""Skip already transcribed json files that exist in the output directory 
+    (assumes you are using a different directory for the output).""",
+    default=False,
+)
 
 args = argparser.parse_args()
 
@@ -73,6 +80,12 @@ device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "c
 # read vad json
 logger.info("Reading json-file list")
 json_files = glob.glob(f"{args.json_dir}/*.json")
+
+if args.skip_already_transcribed:
+    already_transcribed = glob.glob(f"{args.output_dir}/*.json")
+    already_transcribed = [os.path.basename(f) for f in already_transcribed]
+    json_files = [f for f in json_files if os.path.basename(f) not in already_transcribed]
+
 # Split audio files to N parts if using N GPUs and select the part to process
 json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
 json_dicts = read_json_parallel(json_files, num_workers=10)

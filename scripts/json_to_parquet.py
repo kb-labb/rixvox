@@ -197,9 +197,8 @@ df = df.sort_values(["min_date", "chunk_id"]).reset_index(drop=True)
 
 # Create shards for every 25 hours of audio
 df["duration_cumsum"] = df["duration"].cumsum() / 1000 / 60 / 60
-df["shard"] = (
-    (df["duration_cumsum"] // 25).astype(int).astype(str).str.pad(4, side="left", fillchar="0")
-)
+df["shard"] = (df["duration_cumsum"] // 25).astype(int)
+df["shard"] = df["shard"].astype(str).str.pad(4, side="left", fillchar="0")
 
 df.to_parquet("data/riksdagen_old.parquet", index=False)
 
@@ -207,6 +206,44 @@ df.to_parquet("data/riksdagen_old.parquet", index=False)
 
 #### Make parquet files ####
 # Group by shard and split into dataframes
+df = df[
+    [
+        "start",
+        "end",
+        "duration",
+        "text",
+        "text_normalized",
+        "text_whisper",
+        "whisper_transcription",
+        "wav2vec_transcription",
+        "bleu_whisper",
+        "bleu_wav2vec",
+        "wer_whisper",
+        "wer_wav2vec",
+        "whisper_first",
+        "wav2vec_first",
+        "whisper_last",
+        "wav2vec_last",
+        "speech_id",
+        "protocol_id",
+        "sub_ids",
+        "chunk_id",
+        "lang_prob_sv",
+        "audio_file",
+        "name",
+        "party",
+        "gender",
+        "role",
+        "district",
+        "speaker_id",
+        "riksdagen_id",
+        "dates",
+        "date_approx",
+        "year",
+        "shard",
+    ]
+]
+
 df_grouped = df.groupby("shard")
 dfs = [df_grouped.get_group(x) for x in df_grouped.groups]
 

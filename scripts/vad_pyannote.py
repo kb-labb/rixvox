@@ -71,7 +71,7 @@ if __name__ == "__main__":
         metadata = []
         for audio_file in audio_files:
             metadata_dict = {
-                "audio_file": audio_file,
+                "audio_path": audio_file,
                 "metadata": {"dates": re.findall(r"\d{4}-\d{2}-\d{2}", audio_file)},
             }
             metadata.append(metadata_dict)
