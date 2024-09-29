@@ -49,20 +49,39 @@ argparser.add_argument(
     action="store_true",
     help="Overwrite existing transcriptions for the model.",
 )
-argparser.add_argument("--json_dir", type=str, default="data/vad_output")
-argparser.add_argument("--output_dir", type=str, default="data/vad_output")
+argparser.add_argument(
+    "--json_dir",
+    type=str,
+    default="data/vad_output_web",
+)
+argparser.add_argument(
+    "--output_dir",
+    type=str,
+    default="data/vad_wav2vec_output",
+)
 argparser.add_argument(
     "--audio_dir",
     type=str,
     default=None,
 )
-
+argparser.add_argument(
+    "--skip_already_transcribed",
+    action="store_true",
+    help="""Skip already transcribed json files that exist in the output directory 
+    (assumes you are using a different directory for the output).""",
+    default=False,
+)
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 # read vad json
 json_files = glob.glob(f"{args.json_dir}/*.json")
+
+if args.skip_already_transcribed:
+    already_transcribed = glob.glob(f"{args.output_dir}/*.json")
+    already_transcribed = [os.path.basename(f) for f in already_transcribed]
+    json_files = [f for f in json_files if os.path.basename(f) not in already_transcribed]
 
 audio_files = []
 vad_dicts = []

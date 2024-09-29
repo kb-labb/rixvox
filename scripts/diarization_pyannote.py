@@ -1,11 +1,12 @@
 import argparse
 import glob
-import json
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import simplejson as json
 import torch
 from pyannote.audio import Pipeline
 from tqdm import tqdm
@@ -50,9 +51,18 @@ def parse_args():
     argparser.add_argument(
         "--num_threads",
         type=int,
-        default=10,
-        help="Number of threads Pytorch is allowed to use. Otherwise every process will try use all threads available.",
+        default=2,
+        help="Number of threads Pytorch is allowed to use. Otherwise every process may try use all threads available.",
     )
+    argparser.add_argument("--audio_dir", type=str, default="data/audio/2000_2024")
+    argparser.add_argument("--output_dir", type=str, default="data/diarization_output_web")
+    argparser.add_argument(
+        "--skip_already_diarized",
+        action="store_true",
+        help="Skip already diarized files that exist in the output directory",
+        default=False,
+    )
+
     args = argparser.parse_args()
 
     return args
@@ -78,22 +88,34 @@ if __name__ == "__main__":
     logging.info(
         f"Device: {device}. Getting number of interop threads: {torch.get_num_interop_threads()}"
     )
-    logging.info(f"Using device: {device}. Loading pyannote pipeline...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1", use_auth_token=args.hf_auth_token
     )
     pipeline.to(device)
-    logging.info(f"Device: {device}. Pipeline loaded.")
 
     logging.info("Loading audio files...")
-    audio_files = glob.glob("/shared/delat/audio/riksdagen/data/riksdagen_old/**/**/*.mp3")
-    audio_files.extend(glob.glob("/shared/delat/audio/riksdagen/data/riksdagen_old/**/*.mp3"))
+    audio_files = glob.glob(f"{args.audio_dir}/**/*.mp3")
     logging.info(f"Device: {device}. Number of audio files: {len(audio_files)}")
 
+    if args.skip_already_diarized:
+        already_diarized = glob.glob(f"{args.output_dir}/*.json")
+        already_diarized = [os.path.basename(f).replace("json", "mp3") for f in already_diarized]
+        audio_files = [f for f in audio_files if os.path.basename(f) not in already_diarized]
     # Split audio files to 8 parts if using 8 GPUs and select the part to process
     # based on the gpu_id argument
     audio_files = np.array_split(audio_files, args.num_shards)[args.data_shard]
-    dataset = VADAudioDataset(audio_files)
+    metadata_dicts = []
+    for audio_file in audio_files:
+        metadata_dict = {
+            "audio_path": audio_file,
+            "audio_file": os.path.join(*Path(audio_file).parts[-2:]),
+            "metadata": {},
+        }
+        metadata_dicts.append(metadata_dict)
+
+    dataset = VADAudioDataset(
+        metadata=metadata_dicts, audio_dir=None
+    )  # Audio dir already included in audio_files
 
     # Custom data collator
     def collate_fn(batch):
@@ -104,50 +126,52 @@ if __name__ == "__main__":
         dataset, batch_size=1, collate_fn=collate_fn, shuffle=False, num_workers=2
     )
 
+    os.makedirs(args.output_dir, exist_ok=True)
     logging.info(f"Device: {device}. Entering diarization loop...")
-    all_segments = []
     for batch in tqdm(dataloader):
-        logging.info(f"Device: {device}. Batch loaded...")
-        for audio in batch:
-            logging.info(f"Device: {device}. Processing audio...")
-            diarization_segments = pipeline(
-                {
-                    "waveform": torch.from_numpy(audio).unsqueeze(0).to(torch.float32),
-                    "sample_rate": 16000,
-                }
-            )
-            all_segments.append(diarization_segments)
+        for meta in batch:
+            logging.info(f"Device: {device}. Processing audio: {meta['audio_path']}")
+            audio = meta["audio"]
 
-    output_dict = {}
-    output_dict["metadata"] = {
-        "segmentation_model": pipeline.segmentation_model,
-        "clustering_model": pipeline.klustering,
-        "embedding_model": pipeline.embedding,
-    }
+            if audio is None:
+                diarization_segments = []
+            else:
+                diarization_segments = pipeline(
+                    {
+                        "waveform": torch.from_numpy(audio)
+                        .unsqueeze(0)
+                        .to(torch.float32)
+                        .to(device),
+                        "sample_rate": 16000,
+                    }
+                )
 
-    os.makedirs("/data/faton/riksdagen_old/data/diarization_output", exist_ok=True)
-    for i, segments in tqdm(enumerate(all_segments), total=len(all_segments)):
-        diarization_dict = []
-        output_dict["metadata"]["audio_path"] = audio_files[i]
-        for segment in segments.itertracks(yield_label=True):
-            diarization_dict.append(
-                {
-                    "start": segment[0].start,
-                    "end": segment[0].end,
-                    "segment_id": segment[1],
-                    "speaker_id": segment[2],
-                    "start_hhmmss": pd.to_datetime(segment[0].start, unit="s").strftime(
-                        "%H:%M:%S"
-                    ),
-                    "end_hhmmss": pd.to_datetime(segment[0].end, unit="s").strftime("%H:%M:%S"),
-                }
-            )
-        output_dict["chunks"] = diarization_dict
-        # Extract only filename from audio path
-        audio_path = audio_files[i].split("/")[-1]
-        with open(
-            f"/data/faton/riksdagen_old/data/diarization_output/{audio_path}.json",
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(output_dict, f, ensure_ascii=False, indent=4)
+            output_dict = {}
+            output_dict["metadata"] = {
+                "segmentation_model": pipeline.segmentation_model,
+                "clustering_model": pipeline.klustering,
+                "embedding_model": pipeline.embedding,
+            }
+
+            diarization_dict = []
+            output_dict["metadata"]["audio_path"] = meta["audio_file"]
+            for segment in diarization_segments.itertracks(yield_label=True):
+                diarization_dict.append(
+                    {
+                        "start": segment[0].start,
+                        "end": segment[0].end,
+                        "segment_id": segment[1],
+                        "speaker_id": segment[2],
+                        "start_hhmmss": pd.to_datetime(segment[0].start, unit="s").strftime(
+                            "%H:%M:%S"
+                        ),
+                        "end_hhmmss": pd.to_datetime(segment[0].end, unit="s").strftime(
+                            "%H:%M:%S"
+                        ),
+                    }
+                )
+            output_dict["chunks"] = diarization_dict
+            # Extract only filename from audio path
+            json_path = os.path.basename(meta["audio_path"]).replace(".mp3", ".json")
+            with open(os.path.join(args.output_dir, json_path), "w", encoding="utf-8") as f:
+                json.dump(output_dict, f, ensure_ascii=False, indent=4)
