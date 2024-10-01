@@ -2,6 +2,7 @@
 mkdir -p data 
 mkdir -p data/audio
 mkdir -p data/audio/json
+mkdir -p data/riksdagen_web
 
 wget https://data.riksdagen.se/dataset/anforande/anforande-202324.json.zip -P data/audio/json
 wget https://data.riksdagen.se/dataset/anforande/anforande-202223.json.zip -P data/audio/json
@@ -54,5 +55,10 @@ unzip data/audio/json/anforande-200102.json.zip -d data/audio/json/2002
 unzip data/audio/json/anforande-200001.json.zip -d data/audio/json/2001
 unzip data/audio/json/anforande-19992000.json.zip -d data/audio/json/2000
 
+wget https://data.riksdagen.se/dataset/person/person.csv.zip -P data/riksdagen_web
+unzip data/riksdagen_web/person.csv.zip -d data/riksdagen_web
+
+
 # Find json.zip and remove them
 find data/audio/json -name "*.json.zip" -exec rm -f {} \;
+rm -f data/riksdagen_web/person.csv.zip

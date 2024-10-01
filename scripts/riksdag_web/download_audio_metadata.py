@@ -5,6 +5,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from numpy import nanmax, nanmin
 from tqdm import tqdm
 
 from rixvox.api import get_audio_metadata
@@ -94,4 +95,72 @@ df_audiometa = df_audiometa[~df_audiometa["anf_text"].isna()].reset_index(drop=T
 df_audiometa = df_audiometa.loc[:, ~df_audiometa.columns.duplicated("first")]
 
 
-df_audiometa.to_parquet(os.path.join(args.data_dir, "df_audio_metadata.parquet"), index=False)
+df_audiometa = pd.read_parquet(os.path.join(args.data_dir, "df_audio_metadata.parquet"))
+
+#### Add speaker metadata to audio metadata ####
+df_person = pd.read_csv(args.data_dir + "/person.csv")
+
+df_person["From"] = pd.to_datetime(df_person["From"], format="ISO8601")
+df_person["Tom"] = pd.to_datetime(df_person["Tom"], format="ISO8601")
+
+# If a person has been in several parties, we concatenate them (not repeating the same party)
+party_affiliation = (
+    df_person.groupby("Id")
+    .agg(
+        {
+            "From": lambda x: nanmin(x) if not x.isnull().all() else pd.NaT,
+            "Tom": lambda x: nanmax(x) if not x.isnull().all() else pd.NaT,
+            "Parti": lambda x: ", ".join(set(x.dropna())),
+            "Uppdragsroll": lambda x: ", ".join(set(x.dropna())),
+        }
+    )
+    .reset_index()
+)
+
+
+df_person = df_person.groupby("Id").first().reset_index()
+
+party_affiliation = party_affiliation.rename(columns={"Parti": "party", "Uppdragsroll": "role"})
+df_person = df_person.merge(party_affiliation, on="Id", how="left", suffixes=("", "_party"))
+
+df_person["name"] = df_person["Förnamn"] + " " + df_person["Efternamn"]
+df_person["born"] = pd.to_datetime(df_person["Född"], format="ISO8601")
+df_person["gender"] = df_person["Kön"]
+# kvinna = woman in gender columns
+df_person.loc[df_person["gender"] == "kvinna", "gender"] = "woman"
+df_person["district"] = df_person["Valkrets"]
+df_person = df_person.rename(columns={"Id": "riksdagen_id"})
+
+
+df = df_audiometa.merge(
+    df_person[["riksdagen_id", "name", "party", "gender", "born", "district", "role"]],
+    left_on="intressent_id2",
+    right_on="riksdagen_id",
+    how="left",
+)
+df["speaker_id"] = None
+
+# Remove titles and party abbrevations to make it as similar as possible in format to df["speaker"]
+# Temporary column to be able to join names from "text" column to "speaker" column in a common format.
+df["name_temp"] = df["talare"].str.lower()
+df["name_temp"] = df["name_temp"].str.replace(".+?minister", "", regex=True)
+df["name_temp"] = df["name_temp"].str.replace(".+?min\.", "", regex=True)
+df["name_temp"] = df["name_temp"].str.replace(".+?rådet", "", regex=True)
+df["name_temp"] = df["name_temp"].str.replace(".+?[T|t]alman", "", regex=True)
+df["name_temp"] = df["name_temp"].str.replace("Talman", "")
+# Remove everything within parenthesis
+df["name_temp"] = df["name_temp"].str.replace("\(.*\)", "", regex=True)
+df["name_temp"] = df["name_temp"].str.strip()
+# Change first letter of each part of name to Capitalized
+df["name_temp"] = df["name_temp"].apply(lambda x: x.title() if x is not None else None)
+
+df["speaker_from_id"] = True
+df.loc[df["name_temp"].isna(), "speaker_from_id"] = False
+df = coalesce_columns(df, col1="name", col2="name_temp")
+df = coalesce_columns(df, col1="party", col2="parti")
+df = coalesce_columns(df, col1="riksdagen_id", col2="intressent_id2")
+
+df["party"] = df["party"].str.upper()
+df["speech_id"] = df["dok_id"] + "-" + df["anf_nummer"].astype("str")
+
+df.to_parquet(os.path.join(args.data_dir, "df_audio_metadata.parquet"), index=False)

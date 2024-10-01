@@ -15,6 +15,7 @@ from rixvox.dataset import (
     AlignmentChunkerDataset,
     alignment_collate_fn,
     custom_collate_fn,
+    read_json_parallel,
 )
 
 os.makedirs("logs", exist_ok=True)
@@ -32,10 +33,21 @@ argparser = argparse.ArgumentParser()
 argparser.add_argument("--model_name", type=str, default="KBLab/wav2vec2-large-voxrex-swedish")
 argparser.add_argument("--gpu_id", type=int, default=0)
 argparser.add_argument(
-    "--audio_dir", type=str, default="data/audio/all", help="Path to audio files directory."
+    "--audio_dir", type=str, default="data/audio/2000_2024", help="Path to audio files directory."
 )
 argparser.add_argument(
-    "--outdir", type=str, default="data/probs", help="Path to output directory for probs."
+    "--json_dir",
+    type=str,
+    default="data/speeches_by_audiofile_web",
+    help="Path to directory containing json files.",
+)
+argparser.add_argument(
+    "--json_outdir",
+    type=str,
+    default="data/speeches_by_audiofile_probs",
+)
+argparser.add_argument(
+    "--probs_outdir", type=str, default="data/probs", help="Path to output directory for probs."
 )
 argparser.add_argument(
     "--chunk_size", type=int, default=30, help="Number of seconds the audio was chunked by."
@@ -56,19 +68,40 @@ argparser.add_argument(
     default=1,
     help="Number of splits to make for the data. Set to the number of GPUs used.",
 )
+argparser.add_argument(
+    "--skip_already_transcribed",
+    action="store_true",
+    help="""Skip already transcribed json files that exist in the output directory 
+    (assumes you are using a different directory for the output).""",
+    default=False,
+)
 
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
-json_files = glob.glob("data/speeches_by_audiofile/*")
+json_files = glob.glob(os.path.join(args.json_dir, "*.json"))
+if args.skip_already_transcribed:
+    already_transcribed = glob.glob(f"{args.json_outdir}/*.json")
+    already_transcribed = [os.path.basename(f) for f in already_transcribed]
+    json_files = [f for f in json_files if os.path.basename(f) not in already_transcribed]
 
+json_dicts = read_json_parallel(json_files, num_workers=12)
+
+audio_files = []
+for json_dict in json_dicts:
+    audio_files.append(json_dict["metadata"]["audio_file"])
 # Split audio files to 8 parts if using 8 GPUs and select the part to process
 # based on the gpu_id argument
 json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
 
 model = AutoModelForCTC.from_pretrained(args.model_name, torch_dtype=torch.float16).to(device)
-audio_dataset = AlignmentChunkerDataset(json_paths=json_files, model_name=args.model_name)
+audio_dataset = AlignmentChunkerDataset(
+    audio_paths=audio_files,
+    json_paths=json_files,
+    model_name=args.model_name,
+    audio_dir=args.audio_dir,
+)
 
 processor = Wav2Vec2Processor.from_pretrained(
     args.model_name, sample_rate=16000, return_tensors="pt"
@@ -130,14 +163,19 @@ for dataset_info in tqdm(dataloader_datasets):
                 mode="constant",
             )
 
-        probs_list.append(probs)
+        try:
+            probs_list.append(probs)
+        except Exception as e:
+            logger.error(f"Probs shape: {probs.shape}")
+            logger.error(f"Failed to append probs for {current_speech_id}. Error: {e}")
+
         speech_ids.extend(batch["speech_ids"])
 
     # Make audio file the folder to save the probs of all speeches contained within
     probs_dir = os.path.splitext(os.path.basename(dataset_info[0]["json_path"]))[0]
     for speech_id, probs in segment_speech_probs(probs_list=probs_list, speech_ids=speech_ids):
         probs_path = os.path.join(probs_dir, f"{speech_id}.npy")
-        probs_fullpath = os.path.join(args.outdir, probs_path)
+        probs_fullpath = os.path.join(args.probs_outdir, probs_path)
         os.makedirs(os.path.dirname(probs_fullpath), exist_ok=True)
 
         sub_dict["speeches"][speech_index]["probs_file"] = probs_path
@@ -145,5 +183,8 @@ for dataset_info in tqdm(dataloader_datasets):
 
         np.save(probs_fullpath, probs)
 
+    json_file = os.path.basename(dataset_info[0]["json_path"])
+    json_path = os.path.join(args.json_outdir, json_file)
+    logger.info(f"Writing probs to {json_path}")
     with open(dataset_info[0]["json_path"], "w") as f:
         json.dump(sub_dict, f, ensure_ascii=False, indent=4)

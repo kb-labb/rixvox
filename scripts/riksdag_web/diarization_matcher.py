@@ -1,6 +1,7 @@
 import argparse
 import multiprocessing as mp
 import os
+from pathlib import Path
 
 import pandas as pd
 from tqdm import tqdm
@@ -67,7 +68,6 @@ def find_overlaps(df_fuzzy_group, df_segments, min_overlap=0.0000001):
     Returns:
     df_overlap (list): List of overlapping segments
     """
-
     df_overlap = []
     df_segment_group = df_segments[
         df_segments["audio_file"] == df_fuzzy_group["audio_file"].values[0]
@@ -76,7 +76,7 @@ def find_overlaps(df_fuzzy_group, df_segments, min_overlap=0.0000001):
     for i, row in df_fuzzy_group.iterrows():
         df_segment_group = df_segment_group.copy()
         df_segment_group["speech_id"] = row["speech_id"]
-        df_segment_group["speaker_id"] = row["speaker_id"]
+        df_segment_group["speaker_id"] = row["riksdagen_id"]
         df_segment_group["protocol_id"] = row["protocol_id"]
         df_segment_group["text_normalized"] = row["text_normalized"]
         df_segment_group["start_text_time"] = row["start_time"]
@@ -176,11 +176,18 @@ def subset_first_last_segment(df_overlap):
 
 if __name__ == "__main__":
     df_fuzzy = pd.read_parquet(os.path.join(args.data_dir, "string_aligned_speeches.parquet"))
+    df_fuzzy = df_fuzzy[~df_fuzzy["speech_id"].duplicated(keep="first")].reset_index(drop=True)
     df_diarization = pd.read_parquet(os.path.join(args.data_dir, "df_diarization.parquet"))
 
-    df_fuzzy["audio_file"] = df_fuzzy["audio_path"].apply(lambda x: os.path.basename(x))
+    df_fuzzy["speech_id"] = df_fuzzy["dok_id"] + "-" + df_fuzzy["anf_nummer"].astype(str)
+    # dokid to protocol_id
+    df_fuzzy = df_fuzzy.rename(columns={"dok_id": "protocol_id"})
+    df_fuzzy["speaker_id"] = df_fuzzy["riksdagen_id"]
+    df_fuzzy["audio_file"] = df_fuzzy["audio_path"].apply(
+        lambda x: os.path.join(*Path(x).parts[-2:])
+    )
     df_diarization["audio_file"] = df_diarization["audio_path"].apply(
-        lambda x: os.path.basename(x)
+        lambda x: os.path.join(*Path(x).parts[-2:])
     )
     df_diarization["label"] = df_diarization["speaker_id"]  # Rename speaker_id to label
     df_diarization = df_diarization.drop(columns=["speaker_id"])
@@ -245,7 +252,7 @@ if __name__ == "__main__":
         df_overlap["overlap_ratio"] + df_overlap["speaker_ratio_normalized"]
     ) / 2
 
-    # Pick the best candidate speaker within each speech_id based on the overall_score
+    # Pick the best speaker (label) candidate speaker within each speech_id based on the overall_score
     df_overlap = (
         df_overlap.groupby(["audio_file", "label", "speech_id"])[df_overlap.columns.tolist()]
         .apply(lambda x: x.loc[x["overall_score"].idxmax()])
@@ -278,14 +285,14 @@ if __name__ == "__main__":
         .reset_index(drop=True)
     )
 
-    df_overlap = df_overlap[df_overlap["overall_score"] > 0.5].reset_index(drop=True)
-    df_overlap.to_parquet("data/df_overlap.parquet", index=False)
+    df_overlap = df_overlap[df_overlap["overall_score"] > 0.6].reset_index(drop=True)
+    df_overlap.to_parquet(os.path.join(args.data_dir, "df_overlap.parquet"), index=False)
 
-    df_riksdagen = pd.read_parquet("data/riksdagen_speeches_new.parquet")
-    df_riksdagen = df_riksdagen.groupby("speech_id").first().reset_index()
-
+    df_fuzzy["text"] = df_fuzzy["anf_text"]
+    df_fuzzy["date"] = pd.to_datetime(df_fuzzy["anf_datum"])
+    df_fuzzy["dead"] = None
     df_overlap = df_overlap.merge(
-        df_riksdagen[["speech_id", "date", "name", "party", "text", "person_id", "born", "dead"]],
+        df_fuzzy[["speech_id", "date", "name", "party", "gender", "text", "riksdagen_id", "born"]],
         on="speech_id",
         how="left",
     )
@@ -294,6 +301,7 @@ if __name__ == "__main__":
         df_overlap.groupby("audio_file")["start_segment"].diff() == 0
     ) | (df_overlap.groupby("audio_file")["start_segment"].diff(-1) == 0)
 
+    df_overlap["person_id"] = df_overlap["speaker_id"]
     df_overlap = df_overlap[
         [
             "speech_id",
@@ -310,13 +318,13 @@ if __name__ == "__main__":
             "start_segment_same",
             "overall_score",
             "speaker_id",
+            "riksdagen_id",
             "protocol_id",
             "person_id",
             "born",
-            "dead",
             "date",
             "audio_file",
         ]
     ]
 
-    df_overlap.to_parquet("data/rixvox-alignments.parquet", index=False)
+    df_overlap.to_parquet(os.path.join(args.data_dir, "rixvox-alignments.parquet"), index=False)

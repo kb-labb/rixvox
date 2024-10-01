@@ -3,6 +3,7 @@ import glob
 import logging
 import multiprocessing as mp
 import os
+from pathlib import Path
 
 import numpy as np
 import simplejson as json
@@ -23,12 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument("--json_dir", type=str, default="data/speeches_by_audiofile_aligned2")
-argparser.add_argument("--output_dir", type=str, default="data/speeches_by_audiofile_aligned")
+argparser.add_argument("--json_dir", type=str, default="data/speeches_by_audiofile_web")
+argparser.add_argument("--output_dir", type=str, default="data/speeches_by_audiofile_web2")
 args = argparser.parse_args()
-
-json_files = glob.glob(f"{args.json_dir}/*")
-json_dicts = read_json_parallel(json_files, num_workers=10)
 
 
 def add_margin_to_alignments(alignments: list, margin: int) -> list:
@@ -111,6 +109,10 @@ def add_silence_and_make_chunks(speeches: list) -> list:
         make_chunks(speech, min_threshold=1_000, silent_chunks=True, surround_silence=True)
 
 
+json_files = glob.glob(f"{args.json_dir}/*")
+json_dicts = read_json_parallel(json_files, num_workers=10)
+
+
 for json_dict in tqdm(json_dicts):
     speeches = json_dict["speeches"]
     _ = add_silence_and_make_chunks(speeches)  # In place modification
@@ -132,6 +134,9 @@ def write_json(json_dict, output_dir=args.output_dir):
     os.makedirs(output_dir, exist_ok=True)
     audio_file = json_dict["metadata"]["audio_file"]
     # Filename without extension
+
+    # If audio_file is a path, extract the filename
+    audio_file = Path(audio_file).name
     audio_file = os.path.splitext(audio_file)[0]
     json_path = os.path.join(output_dir, f"{audio_file}.json")
     with open(json_path, "w") as f:

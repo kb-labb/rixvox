@@ -270,18 +270,19 @@ class AlignmentChunkerDataset(AudioFileChunkerDataset):
 
     def __init__(
         self,
+        audio_paths,
         json_paths,
         model_name="KBLab/wav2vec2-large-voxrex-swedish",
         audio_dir="data/audio/all",
         sr=16000,  # sample rate
         chunk_size=30,  # seconds per chunk for wav2vec2
     ):
-        audio_paths = [
-            os.path.join(audio_dir, os.path.basename(j).replace(".json", ".mp3"))
-            for j in json_paths
-        ]
         # Inherit methods from AudioFileChunkerDataset
         super().__init__(json_paths=json_paths, audio_paths=audio_paths, model_name=model_name)
+        if audio_dir is not None:
+            audio_paths = [os.path.join(audio_dir, file) for file in audio_paths]
+
+        self.audio_paths = audio_paths
         self.sr = sr
         self.chunk_size = chunk_size
 

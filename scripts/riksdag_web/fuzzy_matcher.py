@@ -31,6 +31,11 @@ argparser.add_argument(
     default="data/vad_wav2vec_output",
 )
 argparser.add_argument(
+    "--data_dir",
+    type=str,
+    default="data/riksdagen_web",
+)
+argparser.add_argument(
     "--num_workers",
     type=int,
     default=16,
@@ -120,8 +125,6 @@ with mp.Pool(args.num_workers + 3) as pool:
 
 df[["word_start", "word_end", "score"]] = pd.DataFrame(scores)
 
-df
-
 # Make word_start and word_end integers and allow for None/NaN
 df[["word_start", "word_end"]] = df[["word_start", "word_end"]].astype("Int64")
 
@@ -136,4 +139,4 @@ df_aligned = df_aligned.drop(["inference_normalized", "text_timestamps"], axis=1
 df_aligned["duration_text"] = df_aligned["end_time"] - df_aligned["start_time"]
 df_aligned = df_aligned[~df_aligned["duration_text"].isna()].reset_index(drop=True)
 
-df_aligned.to_parquet("data/riksdagen_web/string_aligned_speeches_web.parquet", index=False)
+df_aligned.to_parquet(os.path.join(args.data_dir, "string_aligned_speeches.parquet"), index=False)

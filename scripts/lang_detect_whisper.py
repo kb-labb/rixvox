@@ -89,8 +89,6 @@ if __name__ == "__main__":
     logger.info("Reading json-file list")
     json_files = glob.glob(f"{args.json_dir}/*.json")
     # Split audio files to N parts if using N GPUs and select the part to process
-    # Shuffle the list before splitting
-    np.random.shuffle(json_files, random=np.random.RandomState(1337))
     json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
     json_dicts = read_json_parallel(json_files, num_workers=10)
 

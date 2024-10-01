@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import glob
 import multiprocessing as mp
@@ -11,6 +12,13 @@ from tqdm import tqdm
 from rixvox.json import preprocess_json
 from rixvox.metrics import calculate_bleu
 from rixvox.text import normalize_text
+
+argparser = argparse.ArgumentParser()
+argparser.add_argument("--num_workers", type=int, default=16)
+argparser.add_argument("--data_dir", type=str, default="data/riksdagen_web")
+argparser.add_argument("--json_dir", type=str, default="data/vad_wav2vec_output")
+argparser.add_argument("--output_dir", type=str, default="data/speeches_by_audiofile_web")
+args = argparser.parse_args()
 
 tqdm.pandas()
 
@@ -41,7 +49,6 @@ COLUMN_OUTPUT_ORDERING = [
     "start_text_time",
     "end_text_time",
     "born",
-    "dead",
     "bleu_score",
     "overall_score",
     "nr_speech_segments",
@@ -100,7 +107,7 @@ def get_speech_transcriptions(df, df_audio):
     texts = []
     for i in tqdm(range(len(df))):
         text_timestamps = df_audio.loc[
-            df_audio["audio_path"].str.contains(df["audio_path"][i]), "text_timestamps"
+            df_audio["audio_path"].str.contains(df["audio_file"][i]), "text_timestamps"
         ].values[0]
         begin_timestamp = df["start_segment"][i]
         end_timestamp = df["end_segment"][i]
@@ -112,9 +119,7 @@ def get_speech_transcriptions(df, df_audio):
     return texts
 
 
-def json_by_audiofile(
-    df_group, output_dir="data/speeches_by_audiofile_web", audio_dir="data/audio/2000_2024"
-):
+def json_by_audiofile(df_group, output_dir=args.output_dir, audio_dir="data/audio/2000_2024"):
     df_group = df_group.sort_values("start_segment").reset_index(drop=True)
     audio_file_path = os.path.join(audio_dir, df_group["audio_file"][0])
 
@@ -134,7 +139,9 @@ def json_by_audiofile(
         speeches.append(speech_dict)
 
     json_out = {"metadata": metadata, "speeches": speeches}
-    file_path = os.path.join(output_dir, f"{metadata['audio_file'].replace('.mp3', '.json')}")
+
+    file_basename = os.path.basename(metadata["audio_file"])
+    file_path = os.path.join(output_dir, f"{file_basename.replace('.mp3', '.json')}")
 
     with open(file_path, "w") as f:
         json.dump(
@@ -147,9 +154,9 @@ def json_by_audiofile(
 
 
 if __name__ == "__main__":
-    df = pd.read_parquet("data/riksdagen_web/string_aligned_speeches_web.parquet")
+    df = pd.read_parquet(os.path.join(args.data_dir, "rixvox-alignments.parquet"))
+    json_files = glob.glob(os.path.join(args.json_dir, "*.json"))
 
-    json_files = glob.glob("data/vad_wav2vec_output/*.json")
     # Chunk json files into batches of 100
     json_files = [json_files[i : i + 100] for i in range(0, len(json_files), 100)]
     with mp.Pool(16) as pool:
@@ -166,32 +173,32 @@ if __name__ == "__main__":
         lambda x: calculate_bleu(x["text_normalized"], x["transcription_w2v"]), axis=1
     )
 
-    df.to_parquet("data/riksdagen_web/rixvox-alignments_bleu.parquet", index=False)
+    df.to_parquet(os.path.join(args.data_dir, "rixvox-alignments_bleu.parquet"), index=False)
 
-    # #### Output to json ####
-    # df = pd.read_parquet("data/riksdagen_web/rixvox-alignments_bleu.parquet")
-    # df_riksdag = pd.read_parquet("data/riksdagen_speeches_new.parquet")
-    # # Aggregate all possible dates for each speech_id as a list
-    # df_riksdag["date"] = df_riksdag["date"].dt.strftime("%Y-%m-%d")
-    # df_riksdag["dates"] = df_riksdag["speech_id"].map(
-    #     df_riksdag.groupby("speech_id")["date"].agg(list)
-    # )
-    # df_riksdag["date"] = pd.to_datetime(df_riksdag["date"])
+    #### Output to json ####
+    df = pd.read_parquet(os.path.join(args.data_dir, "rixvox-alignments_bleu.parquet"))
 
-    # #### JSON grouped by audio file, format suitable for Riksdagen ####
-    # df = df.merge(
-    #     df_riksdag[
-    #         ["speech_id", "role", "district", "gender", "dates", "riksdagen_id", "speech_number"]
-    #     ],
-    #     on="speech_id",
-    #     how="left",
-    # )
+    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    df["dates"] = df["speech_id"].map(df.groupby("speech_id")["date"].agg(list))
+    df["date"] = pd.to_datetime(df["date"])
 
-    # df = df.sort_values(["audio_file", "start_segment"]).reset_index(drop=True)
-    # df = df[COLUMN_OUTPUT_ORDERING]
+    df_fuzzy = pd.read_parquet(os.path.join(args.data_dir, "string_aligned_speeches.parquet"))
+    df_fuzzy = df_fuzzy[~df_fuzzy["speech_id"].duplicated(keep="first")].reset_index(drop=True)
+    df_fuzzy["speech_number"] = df_fuzzy["anf_nummer"].astype(int)
 
-    # df_grouped = df.groupby("audio_file")
-    # df_grouped = [group for _, group in df_grouped]
+    #### JSON grouped by audio file, format suitable for Riksdagen ####
+    df = df.merge(
+        df_fuzzy[["speech_id", "role", "district", "gender", "speech_number"]],
+        on="speech_id",
+        how="left",
+    )
 
-    # with mp.Pool(12) as pool:
-    #     pool.map(json_by_audiofile, tqdm(df_grouped, total=len(df_grouped)), chunksize=20)
+    df = df.sort_values(["audio_file", "start_segment"]).reset_index(drop=True)
+    df = df[COLUMN_OUTPUT_ORDERING]
+
+    df_grouped = df.groupby("audio_file")
+    df_grouped = [group for _, group in df_grouped]
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    with mp.Pool(14) as pool:
+        pool.map(json_by_audiofile, tqdm(df_grouped, total=len(df_grouped)), chunksize=20)

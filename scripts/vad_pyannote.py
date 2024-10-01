@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import re
+from pathlib import Path
 
 import pandas as pd
 import simplejson as json
@@ -72,6 +73,7 @@ if __name__ == "__main__":
         for audio_file in audio_files:
             metadata_dict = {
                 "audio_path": audio_file,
+                "audio_file": Path(audio_file).name,
                 "metadata": {"dates": re.findall(r"\d{4}-\d{2}-\d{2}", audio_file)},
             }
             metadata.append(metadata_dict)
