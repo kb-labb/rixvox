@@ -163,25 +163,26 @@ for dataset_info in tqdm(dataloader_datasets):
                 mode="constant",
             )
 
-        try:
-            probs_list.append(probs)
-        except Exception as e:
-            logger.error(f"Probs shape: {probs.shape}")
-            logger.error(f"Failed to append probs for {current_speech_id}. Error: {e}")
-
+        probs_list.append(probs)
         speech_ids.extend(batch["speech_ids"])
 
     # Make audio file the folder to save the probs of all speeches contained within
     probs_dir = os.path.splitext(os.path.basename(dataset_info[0]["json_path"]))[0]
-    for speech_id, probs in segment_speech_probs(probs_list=probs_list, speech_ids=speech_ids):
-        probs_path = os.path.join(probs_dir, f"{speech_id}.npy")
-        probs_fullpath = os.path.join(args.probs_outdir, probs_path)
-        os.makedirs(os.path.dirname(probs_fullpath), exist_ok=True)
+    try:
+        for speech_id, probs in segment_speech_probs(probs_list=probs_list, speech_ids=speech_ids):
+            probs_path = os.path.join(probs_dir, f"{speech_id}.npy")
+            probs_fullpath = os.path.join(args.probs_outdir, probs_path)
+            os.makedirs(os.path.dirname(probs_fullpath), exist_ok=True)
 
-        sub_dict["speeches"][speech_index]["probs_file"] = probs_path
-        speech_index += 1
+            sub_dict["speeches"][speech_index]["probs_file"] = probs_path
+            speech_index += 1
 
-        np.save(probs_fullpath, probs)
+            np.save(probs_fullpath, probs)
+    except Exception as e:
+        for speech_id, probs in zip(speech_ids, probs_list):
+            logger.error(f"Speech id: {speech_id}")
+            logger.error(f"Probs shape: {probs.shape}")
+            logger.error(f"Failed to append probs for {current_speech_id}. Error: {e}")
 
     json_file = os.path.basename(dataset_info[0]["json_path"])
     json_path = os.path.join(args.json_outdir, json_file)
