@@ -15,7 +15,7 @@ from rixvox.make_chunks import SILENCE, make_chunks, seconds_to_ms
 os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
-    filename="logs/transcribe_w2v.log",
+    filename="logs/chunk_creator.log",
     level=logging.INFO,
     datefmt="%Y-%m-%d %H:%M:%S",
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
@@ -24,8 +24,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument("--json_dir", type=str, default="data/speeches_by_audiofile_web")
-argparser.add_argument("--output_dir", type=str, default="data/speeches_by_audiofile_web2")
+argparser.add_argument("--json_dir", type=str, default="data/speeches_by_audiofile_aligned_web")
+argparser.add_argument("--output_dir", type=str, default="data/speeches_by_audiofile_chunked_web")
 args = argparser.parse_args()
 
 

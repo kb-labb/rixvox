@@ -195,6 +195,7 @@ if __name__ == "__main__":
 
     df = df.sort_values(["audio_file", "start_segment"]).reset_index(drop=True)
     df = df[COLUMN_OUTPUT_ORDERING]
+    df["born"] = df["born"].dt.strftime("%Y-%m-%d")
 
     df_grouped = df.groupby("audio_file")
     df_grouped = [group for _, group in df_grouped]

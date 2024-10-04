@@ -20,14 +20,28 @@ The dataset is derived from two primary sources.
 
 ### Riksdagen old recordings 1966-2002
 
+Download the text protocols and metadata about speakers/persons from SWERIK's repo. This project used [v.1.0.0 of the Swedish Parliament Corpus](https://github.com/swerik-project/the-swedish-parliament-corpus/releases/tag/v2024.04.26).
+
+* [persons_v1.0.0.zip](https://github.com/swerik-project/the-swedish-parliament-corpus/releases/download/v2024.04.26/persons_v1.0.0.zip)
+* [records_v1.0.0.zip](https://github.com/swerik-project/the-swedish-parliament-corpus/releases/download/v2024.04.26/records_v1.0.0.zip)
+
+1. `scripts/riksdagen_old/riksdagen_corpus.py`
+
 ### Riksdagen web 2000-2024
 
 1. Download the text protocols of speeches from Riksdagens open data: [`bash scripts/utils/download_modern_speeches.sh`](https://github.com/kb-labb/rixvox/blob/main/scripts/utils/download_modern_speeches.sh).
-2. Preprocess the text protocols: [`python scripts/riksdag_web/preprocess_speech_metadata.py](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdag_web/preprocess_speech_metadata.py)
-3. Download metadata about media recordings based on the document ids of text protocols: [`python scripts/riksdag_web/download_audio_metadata.py`](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdag_web/download_audio_metadata.py), and join together this information with text protocol metadata.
-4. Download the media files: [`python scripts/riksdag_web/download_audio.py`](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdag_web/download_audio.py).
-5. Perform fuzzy string matching between wav2vec2 machine transcription and text protocols to determine approximate start/end timestamp of each speech: [`python scripts/riksdag_web/fuzzy_matcher.py](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdag_web/fuzzy_matcher.py).
+2. Preprocess the text protocols: [`python scripts/riksdagen_web/preprocess_speech_metadata.py](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdagen_web/preprocess_speech_metadata.py)
+3. Download metadata about media recordings based on the document ids of text protocols: [`python scripts/riksdagen_web/download_audio_metadata.py`](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdagen_web/download_audio_metadata.py), and join together this information with text protocol metadata.
+4. Download the media files: [`python scripts/riksdagen_web/download_audio.py`](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdagen_web/download_audio.py).
+5. Perform fuzzy string matching between wav2vec2 machine transcription and text protocols to determine approximate start/end timestamp of each speech: [`python scripts/riksdagen_web/fuzzy_matcher.py](https://github.com/kb-labb/rixvox/blob/main/scripts/riksdagen_web/fuzzy_matcher.py).
 6. Perform diarization on audio files to obtain more accurate start/end timestamp of each speech via speaker segments: [`python scripts/diarization_pyannote.py](https://github.com/kb-labb/rixvox/blob/main/scripts/diarization_pyannote.py). 
 7. `scripts/diarization_preprocess.py`
-8. `scripts/riksdag_web/diarization_matcher.py`
-9. `scripts/riksdag_web/dataset_to_json.py`
+8. `scripts/riksdagen_web/diarization_matcher.py`
+9. `scripts/riksdagen_web/dataset_to_json.py`
+10. `scripts/alignment_probs_writer.py`
+11. `scripts/align_transcript_pytorch.py`
+12. `scripts/create_chunks.py`
+13. `scripts/lang_detect_whisper.py`
+14. `scripts/transcribe_wav2vec2.py`
+15. `scripts/transcribe_whisper.py`
+16. `scripts/json_to_parquet.py`

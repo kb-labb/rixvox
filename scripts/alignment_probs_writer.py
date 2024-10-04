@@ -81,6 +81,7 @@ args = argparser.parse_args()
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 json_files = glob.glob(os.path.join(args.json_dir, "*.json"))
+json_files = json_files[0:5000]
 if args.skip_already_transcribed:
     already_transcribed = glob.glob(f"{args.json_outdir}/*.json")
     already_transcribed = [os.path.basename(f) for f in already_transcribed]
@@ -115,6 +116,10 @@ dataloader_datasets = torch.utils.data.DataLoader(
     shuffle=False,
 )
 
+# Number of expected logits outputted by wav2vec2 for given chunk size and sample rate.
+# We pad the batch to this length to ensure that the output probs are of the same length.
+nr_logits = calculate_w2v_output_length(args.chunk_size * args.sample_rate, args.chunk_size)
+
 for dataset_info in tqdm(dataloader_datasets):
     if dataset_info is None:
         continue
@@ -146,13 +151,10 @@ for dataset_info in tqdm(dataloader_datasets):
         probs = torch.nn.functional.softmax(logits, dim=-1)  # Need for alignment
         probs = probs.cpu().numpy()
 
-        if probs.shape[0] == 1:
+        if probs.shape[0] == 1 or probs.shape[1] < nr_logits:
             # Pad the second dimension up to the nr_logits that args.chunk_size * args.sample_rate yields.
-            # Usually collate_fn takes care of this when batch contains more
-            # than 1 obs, but we need to handle the case when a batch contains only 1 obs.
-            nr_logits = calculate_w2v_output_length(
-                args.chunk_size * args.sample_rate, args.chunk_size
-            )
+            # Usually collate_fn takes care of this when batch contains at least 1 obs that is chunk_size long.
+            # We need to handle the case when batch contains only 1 obs, or all obs are shorter than chunk_size.
             probs = np.pad(
                 array=probs,
                 pad_width=(
@@ -177,15 +179,20 @@ for dataset_info in tqdm(dataloader_datasets):
             sub_dict["speeches"][speech_index]["probs_file"] = probs_path
             speech_index += 1
 
+            logger.info(f"Writing probs to {probs_fullpath}")
             np.save(probs_fullpath, probs)
     except Exception as e:
         for speech_id, probs in zip(speech_ids, probs_list):
             logger.error(f"Speech id: {speech_id}")
             logger.error(f"Probs shape: {probs.shape}")
-            logger.error(f"Failed to append probs for {current_speech_id}. Error: {e}")
+            logger.error(f"Failed to concatenate probs for {current_speech_id}. Error: {e}")
+
+        logger.error(f"Failed to write probs for file: {dataset_info[0]['json_path']}")
+        continue  # Skip the rest of the loop if an error occurs
 
     json_file = os.path.basename(dataset_info[0]["json_path"])
     json_path = os.path.join(args.json_outdir, json_file)
-    logger.info(f"Writing probs to {json_path}")
-    with open(dataset_info[0]["json_path"], "w") as f:
+    os.makedirs(args.json_outdir, exist_ok=True)
+    logger.info(f"Writing json to {json_path}")
+    with open(json_path, "w") as f:
         json.dump(sub_dict, f, ensure_ascii=False, indent=4)

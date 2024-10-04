@@ -51,14 +51,16 @@ def get_args():
         action="store_true",
         help="Overwrite existing transcriptions for the model.",
     )
-    argparser.add_argument("--json_dir", type=str, default="data/speeches_by_audiofile_aligned")
+    argparser.add_argument(
+        "--json_dir", type=str, default="data/speeches_by_audiofile_chunked_web"
+    )
     argparser.add_argument("--batch_size", type=int, default=16)
     argparser.add_argument(
         "--audio_dir",
         type=str,
-        default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_old/all",
+        default="data/audio/2000_2024",
     )
-    argparser.add_argument("--output_dir", type=str, default="data/langdetect_output")
+    argparser.add_argument("--output_dir", type=str, default="data/langdetect_output_web")
     return argparser.parse_args()
 
 
@@ -87,7 +89,7 @@ if __name__ == "__main__":
 
     # read vad json
     logger.info("Reading json-file list")
-    json_files = glob.glob(f"{args.json_dir}/*.json")
+    json_files = sorted(glob.glob(f"{args.json_dir}/*.json"))
     # Split audio files to N parts if using N GPUs and select the part to process
     json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
     json_dicts = read_json_parallel(json_files, num_workers=10)

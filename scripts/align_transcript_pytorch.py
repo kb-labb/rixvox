@@ -2,7 +2,7 @@ import argparse
 import glob
 import logging
 import os
-import re
+from pathlib import Path
 
 import numpy as np
 import simplejson as json
@@ -51,13 +51,13 @@ argparser.add_argument(
 argparser.add_argument(
     "--input_dir",
     type=str,
-    default="data/speeches_by_audiofile",
+    default="data/speeches_by_audiofile_probs",
     help="Path to directory with json files.",
 )
 argparser.add_argument(
     "--output_dir",
     type=str,
-    default="data/speeches_by_audiofile_aligned",
+    default="data/speeches_by_audiofile_aligned_web",
     help="Path to directory to save aligned json files.",
 )
 argparser.add_argument(
@@ -100,7 +100,7 @@ def align_and_save(json_dict):
     os.makedirs(args.output_dir, exist_ok=True)
     json_path = os.path.join(
         args.output_dir,
-        os.path.splitext(json_dict["metadata"]["audio_file"])[0] + ".json",
+        Path(json_dict["metadata"]["audio_file"]).stem + ".json",
     )
 
     with open(json_path, "w", encoding="utf-8") as f:
@@ -120,6 +120,8 @@ if __name__ == "__main__":
     json_files = glob.glob(args.input_dir + "/*")
     aligned_files = glob.glob(args.probs_dir + "/*")
     aligned_files = [os.path.basename(f) + ".json" for f in aligned_files]
+    # aligned_files = glob.glob(args.output_dir + "/*")
+    # aligned_files = [os.path.basename(f) for f in aligned_files]
     json_files = [f for f in json_files if os.path.basename(f) in aligned_files]
 
     # Split audio files to N parts if using N GPUs and select the part to process
