@@ -1,11 +1,11 @@
 import argparse
 import glob
-import json
 import logging
 import os
 from pathlib import Path
 
 import numpy as np
+import simplejson as json
 import torch
 from tqdm import tqdm
 from transformers import WhisperForConditionalGeneration

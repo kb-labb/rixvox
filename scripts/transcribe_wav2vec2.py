@@ -2,6 +2,7 @@ import argparse
 import glob
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 import simplejson as json
@@ -14,6 +15,7 @@ from rixvox.dataset import (
     AudioFileChunkerDataset,
     custom_collate_fn,
     make_transcription_chunks_w2v,
+    read_json_parallel,
     wav2vec_collate_fn,
 )
 
@@ -52,12 +54,12 @@ argparser.add_argument(
 argparser.add_argument(
     "--json_dir",
     type=str,
-    default="data/vad_output_web",
+    default="data/riksdagen_web/langdetect_output_web",
 )
 argparser.add_argument(
     "--output_dir",
     type=str,
-    default="data/vad_wav2vec_output",
+    default="data/riksdagen_web/vad_wav2vec_output_web",
 )
 argparser.add_argument(
     "--audio_dir",
@@ -71,11 +73,18 @@ argparser.add_argument(
     (assumes you are using a different directory for the output).""",
     default=False,
 )
+argparser.add_argument(
+    "--skip_word_timestamps",
+    default=False,
+    action="store_true",
+    help="Skip word timestamps in the transcription.",
+)
 args = argparser.parse_args()
 
 device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
 
 # read vad json
+logger.info(f"Reading json files from {args.json_dir}.")
 json_files = glob.glob(f"{args.json_dir}/*.json")
 
 if args.skip_already_transcribed:
@@ -83,23 +92,23 @@ if args.skip_already_transcribed:
     already_transcribed = [os.path.basename(f) for f in already_transcribed]
     json_files = [f for f in json_files if os.path.basename(f) not in already_transcribed]
 
+json_dicts = read_json_parallel(json_files, num_workers=10)
 audio_files = []
-vad_dicts = []
 empty_json_files = []
 
-for json_file in tqdm(json_files):
-    with open(json_file) as f:
-        vad_dict = json.load(f)
-        if len(vad_dict["chunks"]) == 0:
-            # Skip empty or only static audio files
-            empty_json_files.append(json_file)
-            continue
+for json_dict in json_dicts:
+    if len(json_dict["chunks"]) == 0:
+        # Skip empty or only static audio files
+        empty_json_files.append(json_dict["json_path"])
+        continue
 
-        if "audio_path" in vad_dict["metadata"]:
-            audio_files.append(vad_dict["metadata"]["audio_path"])
-        elif "audio_file" in vad_dict["metadata"]:
-            audio_files.append(vad_dict["metadata"]["audio_file"])
-        vad_dicts.append(vad_dict)
+    if "audio_file" in json_dict["metadata"]:
+        audio_files.append(json_dict["metadata"]["audio_file"])
+    elif "audio_path" in json_dict["metadata"]:
+        path = Path(json_dict["metadata"]["audio_path"])
+        # audio_files.append(os.path.join(path.parent.name, path.name))
+        audio_files.append(os.path.join(path.name))
+
 
 json_files = [json_file for json_file in json_files if json_file not in empty_json_files]
 json_files = np.array_split(json_files, args.num_shards)[args.data_shard]
@@ -181,7 +190,7 @@ for dataset_info in tqdm(dataloader_datasets):
                 transcription["text"],
                 word_timestamps=word_timestamps,
                 model_name=args.model_name,
-                include_word_timestamps=True,
+                include_word_timestamps=not args.skip_word_timestamps,
             )
             transcription_texts.extend(transcription_chunk)
 
