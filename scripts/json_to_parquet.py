@@ -191,7 +191,7 @@ def audio_chunker(df, audio_dir, sr=16000):
             yield audio[start_frame:end_frame], audio_file, chunk_id
 
 
-def chunks_to_parquet(df, parquet_dir="test"):
+def chunks_to_parquet(df, parquet_dir=args.parquet_dir):
     shard_id = df["shard"].iloc[0]
     # If file exists, skip
     if os.path.exists(f"{parquet_dir}/riksdagen_old_{shard_id}.parquet"):
