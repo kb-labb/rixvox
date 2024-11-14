@@ -20,6 +20,7 @@ from rixvox.metrics import (
 )
 from rixvox.text import normalize_text
 
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
     filename="logs/json_to_parquet.log",
     level=logging.INFO,
