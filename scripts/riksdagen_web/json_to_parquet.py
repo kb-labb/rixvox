@@ -1,5 +1,6 @@
 import argparse
 import glob
+import logging
 import multiprocessing as mp
 import os
 import tempfile
@@ -19,6 +20,13 @@ from rixvox.metrics import (
 )
 from rixvox.text import normalize_text
 
+logging.basicConfig(
+    filename="logs/json_to_parquet.log",
+    level=logging.INFO,
+    datefmt="%Y-%m-%d %H:%M:%S",
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+)
+
 argparser = argparse.ArgumentParser()
 argparser.add_argument(
     "--json_dir",
@@ -33,7 +41,7 @@ argparser.add_argument(
 argparser.add_argument(
     "--parquet_dir",
     type=str,
-    default="/home/fatrek/data_network/delat/audio/riksdagen/data/riksdagen_web/parquet",
+    default="/data3/data/riksdagen_web/parquet",
 )
 argparser.add_argument(
     "--num_workers",
@@ -182,78 +190,7 @@ def audio_chunker(df, audio_dir, sr=16000):
             yield audio[start_frame:end_frame]
 
 
-json_files = glob.glob(f"{args.json_dir}/*")
-# json_dicts = read_json_parallel(json_files, num_workers=10)
-
-with mp.Pool(16) as pool:
-    df_list = pool.map(json_to_df, tqdm(json_files), chunksize=20)
-
-
-df = pd.concat(df_list)
-df["chunk_id"] = df.index
-# Extract year from dates
-df["year"] = df["dates"].apply(lambda x: datetime.strptime(x[0], "%Y-%m-%d").year)
-df["date_approx"] = pd.to_datetime(df["dates"].apply(lambda x: x[0]), format="%Y-%m-%d")
-df = df.reset_index(drop=True)
-
-# Sort by minimum date in each audio file
-df["min_date"] = df.groupby("audio_file")["date_approx"].transform("min")
-df = df.sort_values(["min_date", "chunk_id"]).reset_index(drop=True)
-
-# Create shards for every 25 hours of audio
-df["duration_cumsum"] = df["duration"].cumsum() / 1000 / 60 / 60
-df["shard"] = (df["duration_cumsum"] // 25).astype(int)
-df["shard"] = df["shard"].astype(str).str.pad(4, side="left", fillchar="0")
-
-df.to_parquet("data/riksdagen_web.parquet", index=False)
-
-# df = pd.read_parquet("data/riksdagen_old.parquet")
-
-#### Make parquet files ####
-# Group by shard and split into dataframes
-df = df[
-    [
-        "start",
-        "end",
-        "duration",
-        "text",
-        "text_normalized",
-        "text_whisper",
-        "whisper_transcription",
-        "wav2vec_transcription",
-        "bleu_whisper",
-        "bleu_wav2vec",
-        "wer_whisper",
-        "wer_wav2vec",
-        "whisper_first",
-        "wav2vec_first",
-        "whisper_last",
-        "wav2vec_last",
-        "speech_id",
-        "protocol_id",
-        "sub_ids",
-        "chunk_id",
-        "lang_prob_sv",
-        "audio_file",
-        "name",
-        "party",
-        "gender",
-        "role",
-        "district",
-        "speaker_id",
-        "riksdagen_id",
-        "dates",
-        "date_approx",
-        "year",
-        "shard",
-    ]
-]
-
-df_grouped = df.groupby("shard")
-dfs = [df_grouped.get_group(x) for x in df_grouped.groups]
-
-
-def chunks_to_parquet(df, parquet_dir=args.parquet_dir):
+def chunks_to_parquet(df, parquet_dir="test"):
     shard_id = df["shard"].iloc[0]
     # If file exists, skip
     if os.path.exists(f"{parquet_dir}/riksdagen_web_{shard_id}.parquet"):
@@ -261,14 +198,88 @@ def chunks_to_parquet(df, parquet_dir=args.parquet_dir):
 
     chunks_generator = audio_chunker(df, audio_dir=args.audio_dir)
 
+    logging.info(f"Processing audio chunks from shard {shard_id}")
     chunks = []
-    for chunk in chunks_generator:
-        chunks.append(chunk)
+    for chunk, audio_file, chunk_id in chunks_generator:
+        chunks.append({"audio": chunk, "audio_file": audio_file, "chunk_id": chunk_id})
 
-    df.loc[:, "audio"] = chunks
+    df_chunk = pd.DataFrame(chunks)
+    df = df.merge(df_chunk, on=["audio_file", "chunk_id"], how="left")
+    logging.info(f"Writing parquet file: {parquet_dir}/riksdagen_web_{shard_id}.parquet")
     df.to_parquet(f"{parquet_dir}/riksdagen_web_{shard_id}.parquet", index=False)
 
 
-os.makedirs(args.parquet_dir, exist_ok=True)
-with mp.Pool(args.num_workers) as pool:
-    pool.map(chunks_to_parquet, tqdm(dfs), chunksize=1)
+with __name__ == "__main__":
+
+    json_files = glob.glob(f"{args.json_dir}/*")
+    # json_dicts = read_json_parallel(json_files, num_workers=10)
+
+    with mp.Pool(16) as pool:
+        df_list = pool.map(json_to_df, tqdm(json_files), chunksize=20)
+
+    df = pd.concat(df_list)
+    df["chunk_id"] = df.index
+    # Extract year from dates
+    df["year"] = df["dates"].apply(lambda x: datetime.strptime(x[0], "%Y-%m-%d").year)
+    df["date_approx"] = pd.to_datetime(df["dates"].apply(lambda x: x[0]), format="%Y-%m-%d")
+    df = df.reset_index(drop=True)
+
+    # Sort by minimum date in each audio file
+    df["min_date"] = df.groupby("audio_file")["date_approx"].transform("min")
+    df = df.sort_values(["min_date", "chunk_id"]).reset_index(drop=True)
+
+    # Create shards for every 25 hours of audio
+    df["duration_cumsum"] = df["duration"].cumsum() / 1000 / 60 / 60
+    df["shard"] = (df["duration_cumsum"] // 25).astype(int)
+    df["shard"] = df["shard"].astype(str).str.pad(4, side="left", fillchar="0")
+
+    df.to_parquet("data/riksdagen_web.parquet", index=False)
+
+    # df = pd.read_parquet("data/riksdagen_old.parquet")
+
+    #### Make parquet files ####
+    # Group by shard and split into dataframes
+    df = df[
+        [
+            "start",
+            "end",
+            "duration",
+            "text",
+            "text_normalized",
+            "text_whisper",
+            "whisper_transcription",
+            "wav2vec_transcription",
+            "bleu_whisper",
+            "bleu_wav2vec",
+            "wer_whisper",
+            "wer_wav2vec",
+            "whisper_first",
+            "wav2vec_first",
+            "whisper_last",
+            "wav2vec_last",
+            "speech_id",
+            "protocol_id",
+            "sub_ids",
+            "chunk_id",
+            "lang_prob_sv",
+            "audio_file",
+            "name",
+            "party",
+            "gender",
+            "role",
+            "district",
+            "speaker_id",
+            "riksdagen_id",
+            "dates",
+            "date_approx",
+            "year",
+            "shard",
+        ]
+    ]
+
+    df_grouped = df.groupby("shard")
+    dfs = [df_grouped.get_group(x) for x in df_grouped.groups]
+
+    os.makedirs(args.parquet_dir, exist_ok=True)
+    with mp.Pool(args.num_workers) as pool:
+        pool.map(chunks_to_parquet, tqdm(dfs), chunksize=1)
