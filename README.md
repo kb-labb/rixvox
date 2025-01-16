@@ -17,6 +17,15 @@ The dataset is derived from two primary sources.
 
 ## Instructions
 
+### Installation and environment
+
+Clone this repo and install requirements with `pip install -r requirements.txt`. 
+
+Install repo as an editable package with
+
+```bash
+pip install -e .
+```
 
 ### Riksdagen old recordings 1966-2002
 
