@@ -3,19 +3,36 @@ from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from rapidfuzz import fuzz
 
 
-def calculate_bleu(text1, text2):
+def calculate_bleu(reference, hypothesis):
     """
     Calculate BLEU score between two texts.
     """
 
-    if text1 is None or text2 is None:
+    if reference is None or hypothesis is None:
         return None
     else:
         chencherry = SmoothingFunction()
         return sentence_bleu(
-            references=[text1.split()],
-            hypothesis=text2.split(),
+            references=[reference.split()],
+            hypothesis=hypothesis.split(),
             smoothing_function=chencherry.method4,
+        )
+
+
+def calculate_rouge(reference, hypothesis):
+    """
+    Calculate weighted ROUGE-N score between two texts.
+    """
+
+    if reference is None or hypothesis is None:
+        return None
+    else:
+        chencherry = SmoothingFunction()
+        return sentence_bleu(
+            references=[hypothesis.split()],
+            hypothesis=reference.split(),
+            smoothing_function=chencherry.method4,
+            weights=(0, 0.25, 0.5, 0.25),
         )
 
 
