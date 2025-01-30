@@ -337,8 +337,12 @@ if __name__ == "__main__":
     os.makedirs(args.output_dir, exist_ok=True)
 
     # list parquet shards
-    riksdagen_old = glob.glob(f"{args.data_dir}/riksdagen_old/parquet/riksdagen_old_*.parquet")
-    riksdagen_web = glob.glob(f"{args.data_dir}/riksdagen_web/parquet/riksdagen_web_*.parquet")
+    riksdagen_old = glob.glob(
+        f"{args.data_dir}/riksdagen_old/data/parquet/riksdagen_old_*.parquet"
+    )
+    riksdagen_web = glob.glob(
+        f"{args.data_dir}/riksdagen_web/data/parquet/riksdagen_web_*.parquet"
+    )
 
     # create df with all parquet files
     filepaths = riksdagen_old + riksdagen_web
@@ -401,7 +405,9 @@ if __name__ == "__main__":
         pool.map(
             create_hf_dataset,
             tqdm(
-                df_filepaths[["filepaths", "new_filepath"]].to_dict(orient="records"),
+                df_filepaths[["filepaths", "new_filepath", "shard_name_new"]].to_dict(
+                    orient="records"
+                ),
                 total=len(df_filepaths),
             ),
             chunksize=1,
