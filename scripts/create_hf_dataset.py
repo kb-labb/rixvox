@@ -14,6 +14,8 @@ from datasets import Audio, Dataset, Sequence, Value, disable_caching, load_data
 from rapidfuzz.distance.Levenshtein import normalized_distance
 from tqdm import tqdm
 
+from rixvox.text import normalize_text
+
 FINAL_COLUMN_ORDER = [
     "text",
     "audio",
@@ -84,8 +86,6 @@ def convert_dataset_to_audio(dataset, audio_column="audio", sampling_rate=16000,
     # First convert the raw arrays to audio bytes
     dataset_with_bytes = dataset.map(
         convert_audio_format,
-        desc="Converting to audio bytes",
-        num_proc=num_workers,  # Adjust based on your CPU cores
     )
 
     # Now cast the column to Audio feature
@@ -277,6 +277,9 @@ def preprocess_dataset(filepath, new_filepath):
         lambda x: re.sub(r"(?<=[<])(\d{1,2}\.\d{2})(?=[>])", r"|\1|", x)
     )
 
+    df["whisper_transcription_normalized"] = df["whisper_transcription"].apply(normalize_text)
+    df["wav2vec_transcription_normalized"] = df["wav2vec_transcription"].apply(normalize_text)
+
     # non-speech segment boolean
     df["is_silence"] = df.apply(
         lambda x: x["text"].strip() == "" and x["wav2vec_transcription"] == "", axis=1
@@ -337,16 +340,15 @@ if __name__ == "__main__":
     os.makedirs(args.output_dir, exist_ok=True)
 
     # list parquet shards
-    riksdagen_old = glob.glob(
-        f"{args.data_dir}/riksdagen_old/data/parquet/riksdagen_old_*.parquet"
-    )
-    riksdagen_web = glob.glob(
-        f"{args.data_dir}/riksdagen_web/data/parquet/riksdagen_web_*.parquet"
-    )
+    riksdagen_old = glob.glob(f"{args.data_dir}/riksdagen_old/parquet/riksdagen_old_*.parquet")
+    riksdagen_web = glob.glob(f"{args.data_dir}/riksdagen_web/parquet/riksdagen_web_*.parquet")
 
     # create df with all parquet files
     filepaths = riksdagen_old + riksdagen_web
     df_filepaths = remap_filepaths(filepaths)
+
+    filepath_dict = df_filepaths.iloc[0].to_dict()
+    filepath_dict["new_filepath"] = os.path.basename(filepath_dict["new_filepath"])
 
     def create_hf_dataset(filepath_dict, cache_dir=args.cache_dir):
         """
@@ -372,6 +374,7 @@ if __name__ == "__main__":
             "parquet",
             data_files=output_filepath,
             cache_dir=cache_dir,
+            streaming=True,
             keep_in_memory=True,
         )
 
@@ -384,10 +387,18 @@ if __name__ == "__main__":
         # Add cer_whisper_first and cer_wav2vec_first, cer_whisper_last and cer_wav2vec_last
         dataset = dataset.map(
             lambda x: {
-                "cer_whisper_first": cer_head(x["text_normalized"], x["whisper_transcription"]),
-                "cer_wav2vec_first": cer_head(x["text_normalized"], x["wav2vec_transcription"]),
-                "cer_whisper_last": cer_tail(x["text_normalized"], x["whisper_transcription"]),
-                "cer_wav2vec_last": cer_tail(x["text_normalized"], x["wav2vec_transcription"]),
+                "cer_whisper_first": cer_head(
+                    x["text_normalized"], x["whisper_transcription_normalized"]
+                ),
+                "cer_wav2vec_first": cer_head(
+                    x["text_normalized"], x["wav2vec_transcription_normalized"]
+                ),
+                "cer_whisper_last": cer_tail(
+                    x["text_normalized"], x["whisper_transcription_normalized"]
+                ),
+                "cer_wav2vec_last": cer_tail(
+                    x["text_normalized"], x["wav2vec_transcription_normalized"]
+                ),
                 "shard": shard,
             },
             num_proc=4,
@@ -399,6 +410,8 @@ if __name__ == "__main__":
         # Write to parquet
         dataset["train"].to_parquet(output_filepath, batch_size=100)
         logging.info(f"Saved dataset to {output_filepath}")
+
+    create_hf_dataset(filepath_dict)
 
     with mp.Pool(args.num_workers) as pool:
         # mp.pool with tqdm
