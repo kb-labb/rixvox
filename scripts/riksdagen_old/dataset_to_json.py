@@ -254,6 +254,8 @@ if __name__ == "__main__":
     df = df.sort_values(["protocol_id", "speech_number"]).reset_index(drop=True)
     df = df[COLUMN_OUTPUT_ORDERING]
 
+    df.to_parquet(os.path.join("data", "rixvox-alignments_speeches_old.parquet"), index=False)
+
     df_grouped = df.groupby("protocol_id")
     df_grouped = [group for _, group in df_grouped]
 

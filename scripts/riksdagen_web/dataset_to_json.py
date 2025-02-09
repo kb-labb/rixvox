@@ -197,6 +197,10 @@ if __name__ == "__main__":
     df = df[COLUMN_OUTPUT_ORDERING]
     df["born"] = df["born"].dt.strftime("%Y-%m-%d")
 
+    df.to_parquet(
+        os.path.join(args.data_dir, "rixvox-alignments_speeches_web.parquet"), index=False
+    )
+
     df_grouped = df.groupby("audio_file")
     df_grouped = [group for _, group in df_grouped]
 
